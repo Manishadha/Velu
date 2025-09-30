@@ -1,0 +1,13 @@
+name: Security
+on:
+  push:
+  schedule:
+    - cron: '0 3 * * *'
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install safety cyclonedx-bom
+      - run: safety check -r requirements.txt || true
+      - run: cyclonedx-bom -r -o sbom.xml

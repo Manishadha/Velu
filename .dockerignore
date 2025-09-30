@@ -1,0 +1,16 @@
+**/.git
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.vscode
+.devcontainer
+tests
+docs
+data/models
+data/threat-intel
+data/rules
+ops/ci-cd

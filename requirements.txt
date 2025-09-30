@@ -1,0 +1,7 @@
+dataclasses-json
+pydantic>=2
+httpx
+uvicorn
+fastapi
+pytest
+ruff
