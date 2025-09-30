@@ -1,1 +1,5 @@
 # model selection per agent
+channels:
+    default: prod
+agents:
+    planning: codellama-0.0.1
