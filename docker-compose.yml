@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: ops/docker/orchestrator.Dockerfile
+    env_file:
+      - ops/config/dev.env
+    volumes:
+      - .:/app
+    command: ["python","main.py"]

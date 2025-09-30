@@ -1,0 +1,1 @@
+{"channels":{"prod":"codellama-0.0.1","staging":"codellama-0.0.2","canary":"codellama-0.0.3"},"models":{"codellama-0.0.1":{"tasks":["codegen"]}}}
