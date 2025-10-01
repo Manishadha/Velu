@@ -23,7 +23,7 @@ jobs:
             - name: Install deps
               run: |
                   pip install -r requirements.txt
-                  pip install pre-commit pip-audit cyclonedx-bom
+                  pip install pre-commit pip-audit
 
             - name: Lint (ruff)
               run: |
@@ -37,13 +37,12 @@ jobs:
             - name: Security audit (pip-audit)
               run: pip-audit -r requirements.txt
 
-            # Use module form to avoid PATH issues with the CLI shim
-            - name: SBOM (CycloneDX)
-              run: python -m cyclonedx_bom -r -o sbom.xml
+            - name: SBOM (CycloneDX via pip-audit)
+              run: pip-audit -r requirements.txt -f cyclonedx-json -o sbom.json
 
             - name: Upload SBOM artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: sbom.xml
-                  path: sbom.xml
+                  name: sbom.json
+                  path: sbom.json
                   if-no-files-found: error
