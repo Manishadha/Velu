@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Velu Tasks</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 2rem; }
+    form, table { margin-top: 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: .5rem; border-bottom: 1px solid #ddd; text-align: left; }
+    code { background: #f6f8fa; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Velu Tasks</h1>
+
+  <form method="post" action="/ui/tasks">
+    <label>Task: <input name="task" value="plan"/></label>
+    <label>Payload (JSON): <input name="payload" size="60" value='{"msg":"hello velu"}'/></label>
+    <button type="submit">Submit</button>
+  </form>
+
+  <h2>Recent ({{ items|length }})</h2>
+  <table>
+    <thead><tr><th>ts</th><th>task</th><th>payload</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td>{{ it.ts }}</td>
+        <td>{{ it.task }}</td>
+        <td><code>{{ it.payload }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
