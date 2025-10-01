@@ -1,14 +1,17 @@
-import os, json
-from fastapi import FastAPI, Request, Form
+import json
+import os
+
+from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from starlette.templating import Jinja2Templates
 
-# storage (JSONL or SQLite depending on env)
+from services.app_server.middleware import (
+    BodySizeLimitMiddleware,
+    RateLimitMiddleware,
+)
 from services.app_server.store import append_task, recent_tasks
-# security middleware (size/rate limits read env at request time)
-from services.app_server.middleware import BodySizeLimitMiddleware, RateLimitMiddleware
-from pydantic import BaseModel
 
 
 class TaskIn(BaseModel):
@@ -63,11 +66,12 @@ def create_app() -> FastAPI:
     @app.get("/ui/tasks")
     def ui_list_tasks(request: Request, limit: int = 50):
         items = recent_tasks(limit=limit)
-        # pretty-print payload for the table
         for it in items:
             if isinstance(it.get("payload"), (dict, list)):
                 it["payload"] = json.dumps(it["payload"], ensure_ascii=False)
-        return templates.TemplateResponse("tasks.html", {"request": request, "items": items})
+        return templates.TemplateResponse(
+            "tasks.html", {"request": request, "items": items}
+        )
 
     @app.post("/ui/tasks")
     def ui_create_task(task: str = Form(...), payload: str = Form("{}")):
@@ -81,9 +85,9 @@ def create_app() -> FastAPI:
     return app
 
 
-# default instance for uvicorn / docker
 app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))

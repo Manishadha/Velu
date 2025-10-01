@@ -1,11 +1,51 @@
-version: "3.9"
 services:
-  orchestrator:
-    build:
-      context: .
-      dockerfile: ops/docker/orchestrator.Dockerfile
-    env_file:
-      - ops/config/dev.env
-    volumes:
-      - .:/app
-    command: ["python","main.py"]
+    orchestrator:
+        build:
+            context: .
+            dockerfile: ops/docker/orchestrator.Dockerfile
+        env_file:
+            - ops/config/dev.env
+        volumes:
+            - .:/app
+        depends_on:
+            api:
+                condition: service_healthy
+        command:
+            [
+                "python",
+                "-u",
+                "-c",
+                "import time; print('orchestrator idle'); time.sleep(10**9)",
+            ]
+
+    api:
+        build:
+            context: .
+            dockerfile: ops/docker/api.Dockerfile
+        volumes:
+            - .:/app
+        ports:
+            - "8000:8000"
+        env_file:
+            - ops/config/dev.env
+        command:
+            [
+                "uvicorn",
+                "services.app_server.main:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload",
+            ]
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "python",
+                    "-c",
+                    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()",
+                ]
+            interval: 10s
+            timeout: 3s
+            retries: 5

@@ -1,0 +1,3 @@
+{"ts": 1759302707.4445767, "type": "echo", "payload": {"task": "ping", "payload": {"msg": "Velu online"}}}
+{"ts": 1759303874.1813295, "type": "task_posted", "request": {"task": "plan", "payload": {"idea": "hello velu", "platforms": ["web", "android"]}}, "response": {"ok": true, "received": {"task": "plan", "payload": {"idea": "hello velu", "platforms": ["web", "android"]}}}}
+{"ts": 1759303892.9786904, "type": "task_posted", "request": {"task": "plan", "payload": {"idea": "hello velu", "platforms": ["web", "android"]}}, "response": {"ok": true, "received": {"task": "plan", "payload": {"idea": "hello velu", "platforms": ["web", "android"]}}}}

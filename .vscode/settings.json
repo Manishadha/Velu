@@ -1,15 +1,32 @@
 {
-  "files.eol": "\n",
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
-  "python.testing.pytestEnabled": true,
-  "python.testing.unittestEnabled": false,
-  "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": {
-    "source.organizeImports": "explicit",
-    "source.fixAll": "explicit"
-  },
-  "ruff.enable": true,
-  "yaml.validate": true,
-  "yaml.schemas": {},
-  "terminal.integrated.defaultProfile.linux": "bash"
+    "files.eol": "\n",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit",
+        "source.fixAll": "explicit"
+    },
+    "ruff.enable": true,
+    "yaml.validate": true,
+    "yaml.schemas": {},
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "chat.mcp.serverSampling": {}
+}
+
+{
+    "chat.mcp.discovery.enabled": true,
+    "mcp": {
+        "inputs": [],
+        "servers": {
+            "safety-mcp": {
+                "url": "https://mcp.safetycli.com/sse",
+                "type": "sse",
+                "headers": {
+                    "Authorization": "Bearer dd9de54b-4e92-4f58-b324-26cdf7d4b967"
+                }
+            }
+        }
+    }
 }

@@ -1,6 +1,7 @@
-import os, json
 from fastapi.testclient import TestClient
+
 from services.app_server.main import create_app
+
 
 def test_sqlite_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("TASK_BACKEND", "sqlite")
@@ -10,7 +11,7 @@ def test_sqlite_roundtrip(tmp_path, monkeypatch):
 
     # write two tasks
     for i in range(2):
-        r = c.post("/tasks", json={"task":"plan","payload":{"i":i}})
+        r = c.post("/tasks", json={"task": "plan", "payload": {"i": i}})
         assert r.status_code == 200
 
     # read back
@@ -20,6 +21,5 @@ def test_sqlite_roundtrip(tmp_path, monkeypatch):
     assert data["ok"] is True
     items = data["items"]
     assert len(items) >= 2
-    # newest first
     assert items[0]["payload"] == {"i": 1}
     assert items[1]["payload"] == {"i": 0}
