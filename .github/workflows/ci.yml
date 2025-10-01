@@ -34,8 +34,10 @@ jobs:
             - name: Run tests (pytest)
               run: pytest -q
 
-            - name: Security audit (Safety v3 scan)
-              run: safety scan -r requirements.txt
+            - name: Security audit (pip-audit)
+              run: |
+                  python -m pip install pip-audit
+                  pip-audit -r requirements.txt
 
             - name: SBOM (CycloneDX)
               run: cyclonedx-bom -r -o sbom.xml
