@@ -1,6 +1,5 @@
 name: CI
-
-on:
+"on":
     push:
     pull_request:
     workflow_dispatch:
@@ -29,14 +28,14 @@ jobs:
             - name: Lint (ruff)
               run: |
                   ruff check .
-                  ruff format --check .
+                  ruff format .
+                  git diff --exit-code
 
             - name: Run tests (pytest)
               run: pytest -q
 
             - name: Security audit (Safety v3 scan)
-              run: |
-                  safety scan -r requirements.txt
+              run: safety scan -r requirements.txt
 
             - name: SBOM (CycloneDX)
               run: cyclonedx-bom -r -o sbom.xml
