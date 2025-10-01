@@ -69,9 +69,7 @@ def create_app() -> FastAPI:
         for it in items:
             if isinstance(it.get("payload"), (dict, list)):
                 it["payload"] = json.dumps(it["payload"], ensure_ascii=False)
-        return templates.TemplateResponse(
-            "tasks.html", {"request": request, "items": items}
-        )
+        return templates.TemplateResponse("tasks.html", {"request": request, "items": items})
 
     @app.post("/ui/tasks")
     def ui_create_task(task: str = Form(...), payload: str = Form("{}")):
