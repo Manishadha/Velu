@@ -21,3 +21,4 @@ data/rules/*
 data/threat-intel/*
 !data/threat-intel/.gitkeep
 sbom.xml
+data/pointers/tasks.log

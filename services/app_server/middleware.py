@@ -1,18 +1,23 @@
 # services/app_server/middleware.py
-import os, time, typing as t
+import os
+import time
 from collections import deque
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+
 def _max_bytes() -> int:
     return int(os.environ.get("MAX_REQUEST_BYTES", str(1 * 1024 * 1024)))  # default 1MB
+
 
 def _rate_conf() -> tuple[int, int]:
     return (
         int(os.environ.get("RATE_REQUESTS", "30")),
         int(os.environ.get("RATE_WINDOW_SEC", "60")),
     )
+
 
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -30,6 +35,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "payload too large"}, status_code=413)
         return await call_next(request)
 
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
@@ -37,7 +43,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def _key(self, request: Request) -> str:
         fwd = request.headers.get("x-forwarded-for")
-        return (fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown"))
+        return (
+            fwd.split(",")[0].strip()
+            if fwd
+            else (request.client.host if request.client else "unknown")
+        )
 
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS" or request.url.path == "/health":

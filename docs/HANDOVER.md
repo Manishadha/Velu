@@ -5,3 +5,5 @@
 3) Tests: `bash scripts/test.sh`
 4) Audit: `bash scripts/audit.sh`
 5) Deploy: see `ops/ci-cd/*.yml` and `ops/docker/*`
+
+source .venv/bin/activate
