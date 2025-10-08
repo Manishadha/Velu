@@ -1,22 +1,28 @@
 {
     "files.eol": "\n",
+    "files.autoSave": "off",
+    "editor.formatOnSave": false,
+    "editor.defaultFormatter": null,
+    "editor.codeActionsOnSave": {},
     "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
     "python.testing.pytestEnabled": true,
     "python.testing.unittestEnabled": false,
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-        "source.organizeImports": "explicit",
-        "source.fixAll": "explicit"
-    },
+    "python.formatting.provider": "none",
     "ruff.enable": true,
+    "ruff.fixOnSave": false,
+    "ruff.organizeImports": false,
+    "ruff.path": [
+        "${workspaceFolder}/.venv/bin/ruff"
+    ],
     "yaml.validate": true,
     "yaml.schemas": {},
     "terminal.integrated.defaultProfile.linux": "bash",
-    "chat.mcp.serverSampling": {}
-}
-
-{
-    "chat.mcp.discovery.enabled": true,
+    "chat.mcp.discovery.enabled": {
+        "claude-desktop": true,
+        "windsurf": true,
+        "cursor-global": true,
+        "cursor-workspace": true
+    },
     "mcp": {
         "inputs": [],
         "servers": {
@@ -28,5 +34,13 @@
                 }
             }
         }
-    }
+    },
+    "css.format.enable": false,
+    "css.format.braceStyle": "expand",
+    "css.format.newlineBetweenRules": false,
+    "css.format.newlineBetweenSelectors": false,
+    "css.format.preserveNewLines": false,
+    "less.format.preserveNewLines": false,
+    "less.format.newlineBetweenSelectors": false,
+    "less.format.newlineBetweenRules": false
 }

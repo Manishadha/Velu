@@ -7,3 +7,5 @@
 5) Deploy: see `ops/ci-cd/*.yml` and `ops/docker/*`
 
 source .venv/bin/activate
+
+SK_REDACTED

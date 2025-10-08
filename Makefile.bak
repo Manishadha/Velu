@@ -31,3 +31,54 @@ docker compose up --build api
 
 api-down:
 docker compose stop api
+
+cli:
+	python -m orchestrator.cli --task plan --payload '{"idea":"hello velu"}' --api http://localhost:8000
+
+cli-docker:
+	docker compose run --rm -e API_URL=http://api:8000 orchestrator python -m orchestrator.cli --task plan --payload '{"idea":"from docker"}'
+
+api-sqlite:
+	TASK_BACKEND=sqlite TASK_DB=./data/pointers/tasks.db \
+	uvicorn services.app_server.main:app --host 0.0.0.0 --port 8000 --reload
+
+APP ?= velu
+PORT ?= 8000
+IMAGE ?= $(APP):latest
+
+.PHONY: fmt lint type sec test cov build run docker-build docker-run
+
+fmt:
+	ruff --fix .
+	ruff format .
+
+lint:
+	ruff .
+
+type:
+	mypy .
+
+sec:
+	bandit -r .
+
+test:
+	pytest -q
+
+cov:
+	pytest --cov=services --cov-report=term-missing
+
+build:
+	python -m build
+
+run:
+	uvicorn services.app_server.main:app --host 0.0.0.0 --port $(PORT)
+
+docker-build:
+	docker build -t $(IMAGE) .
+
+docker-run:
+	docker run --rm -p $(PORT):8000 \
+	  -e CORS_ORIGINS=http://localhost:3000 \
+	  -e TASK_DB=/data/tasks.db \
+	  -v $(PWD)/.data:/data \
+	  $(IMAGE)

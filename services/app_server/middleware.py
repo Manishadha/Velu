@@ -8,58 +8,92 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
-def _max_bytes() -> int:
-    return int(os.environ.get("MAX_REQUEST_BYTES", str(1 * 1024 * 1024)))  # default 1MB
-
-
-def _rate_conf() -> tuple[int, int]:
-    return (
-        int(os.environ.get("RATE_REQUESTS", "30")),
-        int(os.environ.get("RATE_WINDOW_SEC", "60")),
-    )
-
-
 class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    def _max_bytes(self) -> int:
+        return int(os.environ.get("MAX_REQUEST_BYTES", "1048576"))
+
     async def dispatch(self, request: Request, call_next):
-        # Let preflight/health pass quickly
-        if request.method == "OPTIONS" or request.url.path == "/health":
-            return await call_next(request)
-        # Content-Length short-circuit
-        cl = request.headers.get("content-length")
-        max_bytes = _max_bytes()
-        if cl and cl.isdigit() and int(cl) > max_bytes:
-            return JSONResponse({"detail": "payload too large"}, status_code=413)
-        # Fallback to reading the body
-        body = await request.body()
-        if len(body) > max_bytes:
-            return JSONResponse({"detail": "payload too large"}, status_code=413)
+        if request.method in ("POST", "PUT", "PATCH"):
+            # read and re-inject the body with a size check
+            body = await request.body()
+            if len(body) > self._max_bytes():
+                return JSONResponse({"detail": "payload too large"}, status_code=413)
+
+            async def receive():
+                return {"type": "http.request", "body": body, "more_body": False}
+
+            return await call_next(Request(scope=request.scope, receive=receive))
         return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Per-bucket sliding-window limiter.
+    Buckets:
+      - If X-API-Key present:   "apk:<value>"   (per key)
+      - Else if auth set state: request.state.rate_bucket
+      - Else:                   client IP
+    Behavior:
+      - Pre-check window; if already >= limit -> 429
+      - Call downstream
+      - If response is 401 -> don't count
+      - Else -> record a hit and return response
+    """
+
     def __init__(self, app):
         super().__init__(app)
         self.hits: dict[str, deque[float]] = {}
 
-    def _key(self, request: Request) -> str:
+    def _bucket_for(self, request: Request) -> str:
+        # Prefer explicit API key header (guarantees per-key isolation)
+        hdr_key = request.headers.get("x-api-key")
+        if hdr_key:
+            return f"apk:{hdr_key}"
+
+        # Otherwise prefer bucket set by auth middleware (if any)
+        if hasattr(request.state, "rate_bucket") and request.state.rate_bucket:
+            return request.state.rate_bucket
+
+        # Fallback to client IP
         fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            return f"ip:{fwd.split(',')[0].strip()}"
+        return f"ip:{request.client.host if request.client else 'unknown'}"
+
+    def _limits(self) -> tuple[int, int]:
+        # allowed, window_seconds
         return (
-            fwd.split(",")[0].strip()
-            if fwd
-            else (request.client.host if request.client else "unknown")
+            int(os.environ.get("RATE_REQUESTS", "60")),
+            int(os.environ.get("RATE_WINDOW_SEC", "60")),
         )
 
     async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS" or request.url.path == "/health":
-            return await call_next(request)
+        bucket = self._bucket_for(request)
+        allowed, window = self._limits()
+
         now = time.time()
-        key = self._key(request)
-        q = self.hits.setdefault(key, deque())
-        rate, window = _rate_conf()
-        # drop old
-        while q and (now - q[0]) > window:
-            q.popleft()
-        if len(q) >= rate:
+        dq = self.hits.setdefault(bucket, deque())
+
+        # purge old hits
+        while dq and (now - dq[0]) > window:
+            dq.popleft()
+
+        # PRE-CHECK: already at or over quota?
+        if len(dq) >= allowed:
             return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)
-        q.append(now)
-        return await call_next(request)
+
+        # Run downstream
+        response = await call_next(request)
+
+        # Don't count unauthorized attempts
+        if getattr(response, "status_code", 200) == 401:
+            return response
+
+        # Record this authorized request
+        t = time.time()
+        dq.append(t)
+        # purge again (strictness)
+        while dq and (t - dq[0]) > window:
+            dq.popleft()
+
+        return response

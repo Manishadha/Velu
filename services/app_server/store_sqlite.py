@@ -1,7 +1,8 @@
 import os
 import sqlite3
 import time
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 
 def db_path() -> str:
@@ -28,18 +29,22 @@ def init_db():
         cx.commit()
 
 
-def insert(task: Dict[str, Any]) -> None:
+def insert(task: dict[str, Any]) -> None:
     import json
 
     with _conn() as cx:
         cx.execute(
             "INSERT INTO tasks (ts, task, payload) VALUES (?, ?, ?)",
-            (time.time(), task["task"], json.dumps(task["payload"], ensure_ascii=False)),
+            (
+                time.time(),
+                task["task"],
+                json.dumps(task["payload"], ensure_ascii=False),
+            ),
         )
         cx.commit()
 
 
-def list_recent(limit: int = 50) -> Iterable[Dict[str, Any]]:
+def list_recent(limit: int = 50) -> Iterable[dict[str, Any]]:
     import json
 
     with _conn() as cx:
@@ -47,7 +52,7 @@ def list_recent(limit: int = 50) -> Iterable[Dict[str, Any]]:
             "SELECT id, ts, task, payload FROM tasks ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    out: list[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for rid, ts, task, payload in rows:
         out.append({"id": rid, "ts": ts, "task": task, "payload": json.loads(payload)})
     return out

@@ -1,5 +1,5 @@
-extends: default
 rules:
-  line-length: disable
-  document-start:
-    present: false
+    comments:
+        min-spaces-from-content: 1
+        # or to stop caring:
+        # min-spaces-from-content: 1

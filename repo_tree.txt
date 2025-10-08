@@ -1,0 +1,341 @@
+.
+├── agents
+│   ├── architecture_agent.py
+│   ├── build_agent.py
+│   ├── codegen_agent.py
+│   ├── debug_agent.py
+│   ├── deploy_agent.py
+│   ├── executor_agent.py
+│   ├── __init__.py
+│   ├── planning_agent.py
+│   ├── security_agent.py
+│   └── ui_agent.py
+├── bandit.yaml
+├── CACHED
+├── caddy
+│   └── Caddyfile
+├── Caddyfile
+├── Caddyfile.bak.2025-10-04-134941
+├── CODEOWNERS
+├── configs
+│   ├── database.yml
+│   ├── logging.yml
+│   ├── models.yml
+│   └── policies.yml
+├── CONTRIBUTING.md
+├── .coverage
+├── coverage.xml
+├── .data
+├── data
+│   ├── .keep
+│   ├── migrations
+│   │   └── .gitkeep
+│   ├── models
+│   │   └── .gitkeep
+│   ├── pointers
+│   │   ├── .gitkeep
+│   │   ├── orchestrator.log
+│   │   ├── tasks.db
+│   │   └── tasks.log
+│   ├── rules
+│   │   ├── baseline.json
+│   │   └── .gitkeep
+│   └── threat-intel
+│       └── .gitkeep
+├── .devcontainer
+│   └── devcontainer.json
+├──  docker-compose.override.yml
+├── docker-compose.yml
+├── Dockerfile
+├── .dockerignore
+├── docs
+│   ├── ARCHITECTURE.md
+│   ├── AUDIT_CHECKLIST.md
+│   ├── CHANGELOG.md
+│   ├── COMPLIANCE.md
+│   ├── HANDOVER.md
+│   └── SECURITY.md
+├── .editorconfig
+├── .env
+├── .env.example
+├── .gitattributes
+├── .git-blame-ignore-revs
+├── .github
+│   └── workflows
+│       ├── ci.yml
+│       └── docker.yml
+├── .gitignore
+├── LICENSE
+├── main.py
+├── Makefile
+├── Makefile.bak
+├── monitoring
+│   ├── prom_basic_pass.txt
+│   ├── prom_basic_pass.txt.example
+│   └── prometheus.yml
+├── .mypy_cache
+│   ├── 3.12
+│   │   ├── abc.data.json
+│   │   ├── abc.meta.json
+│   │   ├── agents
+│   │   ├── agents.data.json
+│   │   ├── agents.meta.json
+│   │   ├── argparse.data.json
+│   │   ├── argparse.meta.json
+│   │   ├── _ast.data.json
+│   │   ├── _ast.meta.json
+│   │   ├── builtins.data.json
+│   │   ├── builtins.meta.json
+│   │   ├── _codecs.data.json
+│   │   ├── codecs.data.json
+│   │   ├── _codecs.meta.json
+│   │   ├── codecs.meta.json
+│   │   ├── collections
+│   │   ├── _collections_abc.data.json
+│   │   ├── _collections_abc.meta.json
+│   │   ├── contextlib.data.json
+│   │   ├── contextlib.meta.json
+│   │   ├── dataclasses.data.json
+│   │   ├── dataclasses.meta.json
+│   │   ├── datetime.data.json
+│   │   ├── datetime.meta.json
+│   │   ├── email
+│   │   ├── enum.data.json
+│   │   ├── enum.meta.json
+│   │   ├── __future__.data.json
+│   │   ├── __future__.meta.json
+│   │   ├── genericpath.data.json
+│   │   ├── genericpath.meta.json
+│   │   ├── importlib
+│   │   ├── io.data.json
+│   │   ├── io.meta.json
+│   │   ├── json
+│   │   ├── main.data.json
+│   │   ├── main.meta.json
+│   │   ├── orchestrator
+│   │   ├── os
+│   │   ├── pathlib.data.json
+│   │   ├── pathlib.meta.json
+│   │   ├── @plugins_snapshot.json
+│   │   ├── posixpath.data.json
+│   │   ├── posixpath.meta.json
+│   │   ├── re.data.json
+│   │   ├── re.meta.json
+│   │   ├── resource.data.json
+│   │   ├── resource.meta.json
+│   │   ├── services
+│   │   ├── sqlite3
+│   │   ├── sre_compile.data.json
+│   │   ├── sre_compile.meta.json
+│   │   ├── sre_constants.data.json
+│   │   ├── sre_constants.meta.json
+│   │   ├── sre_parse.data.json
+│   │   ├── sre_parse.meta.json
+│   │   ├── subprocess.data.json
+│   │   ├── subprocess.meta.json
+│   │   ├── sys
+│   │   ├── time.data.json
+│   │   ├── time.meta.json
+│   │   ├── types.data.json
+│   │   ├── _typeshed
+│   │   ├── types.meta.json
+│   │   ├── typing.data.json
+│   │   ├── typing_extensions.data.json
+│   │   ├── typing_extensions.meta.json
+│   │   ├── typing.meta.json
+│   │   └── zipfile
+│   ├── CACHEDIR.TAG
+│   └── .gitignore
+├── mypy.ini
+├── ops
+│   ├── ci-cd
+│   │   ├── build.yml
+│   │   ├── security-scan.yml
+│   │   └── test.yml
+│   ├── config
+│   │   ├── dev.env
+│   │   ├── prod.env
+│   │   └── staging.env
+│   ├── docker
+│   │   ├── api.Dockerfile
+│   │   ├── model-router.Dockerfile
+│   │   ├── orchestrator.Dockerfile
+│   │   ├── policy-engine.Dockerfile
+│   │   └── worker.Dockerfile
+│   └── k8s
+│       ├── model-router.yaml
+│       ├── orchestrator.yaml
+│       └── policy-engine.yaml
+├── orchestrator
+│   ├── agent_contracts.py
+│   ├── cli.py
+│   ├── __init__.py
+│   ├── router_client.py
+│   ├── state_manager.py
+│   └── task_scheduler.py
+├── .pre-commit-config.yaml
+├── prometheus_stats.json
+├── prometheus.yml
+├── pyproject.toml
+├── .pytest_cache
+│   ├── CACHEDIR.TAG
+│   ├── .gitignore
+│   ├── README.md
+│   └── v
+│       └── cache
+├── reading
+├── README.md
+├── repo_tree.txt
+├── requirements.txt
+├── .ruff_cache
+│   ├── 0.13.2
+│   │   ├── 10650947774312540284
+│   │   ├── 10738168055487772677
+│   │   ├── 11031980454798718806
+│   │   ├── 11513128804365051582
+│   │   ├── 12911878737025370495
+│   │   ├── 13317895007949020591
+│   │   ├── 13412091047384105260
+│   │   ├── 15411115946814851744
+│   │   ├── 16224027402745353468
+│   │   ├── 16267944922793535572
+│   │   ├── 16386087782857722990
+│   │   ├── 1701219115686088701
+│   │   ├── 24072543430562606
+│   │   ├── 2707533507418405979
+│   │   ├── 2769376934790033821
+│   │   ├── 4034905386292616192
+│   │   ├── 6138973538301327748
+│   │   ├── 7202377269460632801
+│   │   ├── 8139307003699385304
+│   │   ├── 8740869480568341046
+│   │   └── 9927745340972897441
+│   ├── 0.14.0
+│   │   ├── 10099585436807475342
+│   │   ├── 10647405279800442853
+│   │   └── 17498399074532368981
+│   ├── 0.6.3
+│   │   ├── 12321964438526412992
+│   │   ├── 12337792435689686702
+│   │   ├── 14438435356828644426
+│   │   ├── 14843272410317615919
+│   │   ├── 15943812818208322751
+│   │   ├── 16523579330605227979
+│   │   ├── 2947722806345376996
+│   │   └── 5075987884117853538
+│   ├── 0.6.4
+│   │   ├── 11842500141448119034
+│   │   ├── 1327476887946301357
+│   │   ├── 15361744899760601542
+│   │   ├── 3285746270908929909
+│   │   ├── 3807764113151020695
+│   │   └── 8934759815415656562
+│   ├── 0.6.9
+│   │   ├── 10701945066866275098
+│   │   ├── 10809365070576831992
+│   │   ├── 11096664958299337945
+│   │   ├── 11118250113439978938
+│   │   ├── 1160520604073160696
+│   │   ├── 12392482842768477372
+│   │   ├── 12489519090349229244
+│   │   ├── 12533428425409425272
+│   │   ├── 12846929071264201167
+│   │   ├── 13190807605713927991
+│   │   ├── 13485351121686411632
+│   │   ├── 13905318000805734771
+│   │   ├── 14883643122151728681
+│   │   ├── 15363975482620592222
+│   │   ├── 15405001069410413510
+│   │   ├── 15769811914174495084
+│   │   ├── 15798907873178349038
+│   │   ├── 16095779469777884570
+│   │   ├── 17093037551860347962
+│   │   ├── 1740831570256369562
+│   │   ├── 2271866207401350556
+│   │   ├── 3523116027434488355
+│   │   ├── 3599795352376985682
+│   │   ├── 3983632786064072790
+│   │   ├── 4471725535793668431
+│   │   ├── 7613270463825837329
+│   │   ├── 8714078016623591629
+│   │   └── 9320854750411139928
+│   ├── CACHEDIR.TAG
+│   └── .gitignore
+├── scripts
+│   ├── audit.sh
+│   ├── lint.sh
+│   ├── migrate.sh
+│   ├── print_metrics.sh
+│   ├── run.sh
+│   ├── setup.sh
+│   ├── smoke.sh
+│   ├── sqlite_backup.py
+│   ├── submit_task.py
+│   ├── submit_task.sh
+│   └── test.sh
+├── SECURITY.md
+├── services
+│   ├── agents
+│   │   ├── analyzer.py
+│   │   ├── executor.py
+│   │   ├── __init__.py
+│   │   ├── planner.py
+│   │   └── reporter.py
+│   ├── app_server
+│   │   ├── auth.py
+│   │   ├── main.py
+│   │   ├── main.py.bak
+│   │   ├── main.py.bak2
+│   │   ├── main.py.bak.latency_alias
+│   │   ├── main.py.bak.metrics
+│   │   ├── main.py.bak.metrics_fix
+│   │   ├── middleware.py
+│   │   ├── static
+│   │   ├── store.py
+│   │   ├── store.py.bak.ts
+│   │   ├── store_sqlite.py
+│   │   └── templates
+│   ├── feedback-monitor
+│   │   ├── analyzer.py
+│   │   ├── __init__.py
+│   │   └── monitor.py
+│   ├── __init__.py
+│   ├── model_router
+│   │   ├── __init__.py
+│   │   ├── model-router
+│   │   └── registry.py
+│   ├── policy_engine
+│   │   ├── engine.py
+│   │   ├── __init__.py
+│   │   └── policy-engine
+│   ├── queue
+│   │   ├── sqlite_queue.py
+│   │   ├── standalone_worker.py
+│   │   └── worker_entry.py
+│   └── worker
+│       └── main.py
+├── tests
+│   ├── __init__.py
+│   ├── integration
+│   │   ├── __init__.py
+│   │   ├── test_api.py
+│   │   ├── test_auth.py
+│   │   ├── test_ready.py
+│   │   ├── test_router_policy.py
+│   │   ├── test_security.py
+│   │   ├── test_store_sqlite.py
+│   │   └── test_worker.py
+│   ├── performance
+│   │   └── __init__.py
+│   ├── security
+│   │   └── __init__.py
+│   └── unit
+│       ├── __init__.py
+│       └── test_store_ts_compat.py
+├── velu_chat_behavior_2025.txt
+├── .vscode
+│   ├── extensions.json
+│   └── settings.json
+└── .yamllint.yaml
+
+64 directories, 275 files

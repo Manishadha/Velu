@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "velu-app"
+    metrics_path: /metrics
+    scheme: http
+    basic_auth:
+      username: ${METRICS_USER}
+      # yamllint disable-line rule:comments
+      password: ${METRICS_PASSWORD_PLAINTEXT} # or hardcode it; Prometheus needs the plaintext
+    static_configs:
+      - targets: ["caddy:80"]

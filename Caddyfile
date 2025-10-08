@@ -1,0 +1,17 @@
+:80 {
+  encode zstd gzip
+
+  # protect only /metrics
+  route /metrics* {
+    basic_auth {
+      # username: admin
+      admin $2a$14$Rj88DDAiPcprIoM4H.6vzO4jj1w5Hc5NfKA3GIE8EH.bJOPogLCI.
+    }
+    reverse_proxy app:8000
+  }
+
+  # everything else to app (health, UI, etc.)
+  route * {
+    reverse_proxy app:8000
+  }
+}

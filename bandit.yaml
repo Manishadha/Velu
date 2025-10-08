@@ -1,0 +1,22 @@
+# .bandit (YAML)
+skips:
+    # We knowingly use asserts in tests, and subprocess is reported inside .venv
+    # yamllint disable-line rule:comments
+    - B101 # assert_used
+    # yamllint disable-line rule:comments
+    - B404 # subprocess import (in .venv only)
+    # yamllint disable-line rule:comments
+    - B603 # subprocess without shell=True (in .venv only)
+
+exclude_dirs:
+    - .venv
+    - tests
+    - data
+    - build
+    - dist
+
+# Limit what Bandit scans when run from repo root
+targets:
+    - services
+    - orchestrator
+    - ops

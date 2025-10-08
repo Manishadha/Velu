@@ -1,5 +1,48 @@
-# model selection per agent
-channels:
-    default: prod
-agents:
-    planning: codellama-0.0.1
+# Local-first routing. No external providers required.
+
+default:
+  name: local-llm
+  provider: llama.cpp
+  params:
+    temperature: 0.2
+    max_tokens: 512
+    context_window: 8192
+
+routes:
+  plan:
+    name: plan-model
+    provider: llamafile
+    params:
+      temperature: 0.2
+      max_tokens: 512
+
+  analyze:
+    name: local-llm
+    provider: llama.cpp
+    params: {}
+
+  execute:
+    name: local-llm
+    provider: llama.cpp
+    params: {}
+
+  report:
+    name: local-llm
+    provider: llama.cpp
+    params: {}
+
+  codegen:
+    name: codegen-model
+    provider: starcoder
+    params:
+      temperature: 0.1
+      max_tokens: 512
+
+# Optional OpenAI alternative for plan (keep commented):
+# routes:
+#   plan:
+#     name: gpt-4o-mini
+#     provider: openai
+#     params:
+#       temperature: 0.2
+#       max_tokens: 512

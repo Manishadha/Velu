@@ -1,0 +1,44 @@
+# Public domain (HTTPS via Caddy if DNS points here)
+your-domain.example.com {
+  encode zstd gzip
+
+  # Protect /metrics only
+  @metrics path /metrics
+  handle @metrics {
+    basic_auth {
+      admin {
+        hashed_password $2a$14$bbQEcg6XTWhyIObSoNMJC.kT5ZRhtvPz3CWG5GJ1P9ZwA0YCUOUOS
+      }
+    }
+    reverse_proxy app:8000
+  }
+
+  # All other routes proxy straight through
+  reverse_proxy app:8000
+
+  # Security headers
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  }
+}
+
+# Local access (plain HTTP on 80), useful for localhost testing
+:80 {
+  encode zstd gzip
+
+  @metrics path /metrics
+  handle @metrics {
+    basic_auth {
+      admin {
+        hashed_password $2a$14$bbQEcg6XTWhyIObSoNMJC.kT5ZRhtvPz3CWG5GJ1P9ZwA0YCUOUOS
+      }
+    }
+    reverse_proxy app:8000
+  }
+
+  reverse_proxy app:8000
+}

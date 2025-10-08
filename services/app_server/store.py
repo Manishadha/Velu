@@ -1,55 +1,119 @@
 import json
 import os
+import sqlite3
 import time
-from typing import Any, Dict
+from contextlib import suppress
+from typing import Any
+
+ts = int(time.time())
 
 
-def use_sqlite() -> bool:
-    return os.environ.get("TASK_BACKEND", "jsonl").lower() == "sqlite"
+# --- Paths helpers -----------------------------------------------------------
 
 
-# -------- JSONL backend (current default) --------
-def _log_path() -> str:
-    return os.environ.get("TASK_LOG", "data/pointers/tasks.log")
+def _resolve_paths() -> tuple[str, str]:
+    """
+    Returns (task_db_path, task_log_path).
 
+    Behavior:
+      - If TASK_DB is set, we log next to it (same dir), unless TASK_LOG overrides.
+      - Else, we use DATA_DIR (if set), else "data/pointers".
+      - TASK_LOG, if set, always wins for the log file.
+    """
+    # default DB dir
+    default_dir = os.path.join("data", "pointers")
 
-def _append_jsonl(task: Dict[str, Any]) -> None:
-    log = _log_path()
-    os.makedirs(os.path.dirname(log), exist_ok=True)
-    rec = {"ts": time.time(), **task}
-    with open(log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-
-def _list_jsonl(limit: int = 50):
-    path = _log_path()
-    if not os.path.exists(path):
-        return []
-    out = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                out.append(json.loads(line))
-            except Exception:
-                continue
-    return list(reversed(out[-limit:]))
-
-
-# -------- public API (delegates to chosen backend) --------
-def append_task(task: Dict[str, Any]) -> None:
-    if use_sqlite():
-        from services.app_server import store_sqlite as s
-
-        s.init_db()
-        s.insert(task)
+    task_db = os.environ.get("TASK_DB")
+    if task_db:
+        base_dir = os.path.dirname(task_db) or default_dir
     else:
-        _append_jsonl(task)
+        base_dir = os.environ.get("DATA_DIR") or default_dir
+        task_db = os.path.join(base_dir, "tasks.db")
+
+    task_log = os.environ.get("TASK_LOG") or os.path.join(base_dir, "tasks.log")
+    return task_db, task_log
 
 
-def recent_tasks(limit: int = 50):
-    if use_sqlite():
-        from services.app_server import store_sqlite as s
+# --- JSONL append ------------------------------------------------------------
 
-        s.init_db()
-        return s.list_recent(limit=limit)
-    return _list_jsonl(limit=limit)
+
+def _append_jsonl(task: dict[str, Any]) -> None:
+    _, log = _resolve_paths()
+    os.makedirs(os.path.dirname(log), exist_ok=True)  # will be writable in tests
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps(task, ensure_ascii=False) + "\n")
+
+
+# --- Public API used by app --------------------------------------------------
+
+
+def append_task(task: dict[str, Any]) -> None:
+    """
+    Append to JSONL and optionally persist to sqlite if TASK_DB exists/needed.
+    Handles both schemas:
+      - legacy: tasks(id, task, payload)
+      - new:    tasks(id, ts, task, payload) with ts NOT NULL
+    """
+    _append_jsonl(task)
+
+    db_path, _ = _resolve_paths()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+
+        # Create table (new schema) if missing
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                task TEXT NOT NULL,
+                payload TEXT
+            )
+            """
+        )
+
+        # Detect columns actually present (table may already exist with/without ts)
+        cur.execute("PRAGMA table_info(tasks)")
+        cols = {row[1] for row in cur.fetchall()}  # row[1] is column name
+
+        payload_json = json.dumps(task.get("payload") or {})
+        if "ts" in cols:
+            cur.execute(
+                "INSERT INTO tasks (ts, task, payload) VALUES (?, ?, ?)",
+                (int(time.time()), task.get("task"), payload_json),
+            )
+        else:
+            # Fallback for legacy schema that didn't have ts
+            cur.execute(
+                "INSERT INTO tasks (task, payload) VALUES (?, ?)",
+                (task.get("task"), payload_json),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def recent_tasks(limit: int = 50) -> list[dict[str, Any]]:
+    db_path, _ = _resolve_paths()
+    if not os.path.exists(db_path):
+        return []
+
+    out: list[dict[str, Any]] = []
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT task, payload FROM tasks ORDER BY id DESC LIMIT ?", (limit,)
+        )
+        rows = cur.fetchall()
+        for task_name, payload_json in rows:
+            payload: Any = None
+            with suppress(Exception):
+                payload = json.loads(payload_json) if payload_json else None
+            out.append({"task": task_name, "payload": payload})
+    finally:
+        conn.close()
+    return out

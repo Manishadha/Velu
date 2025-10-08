@@ -1,36 +1,255 @@
+# services/app_server/main.py
+from __future__ import annotations
+
 import json
 import os
+import re
+import sqlite3
+import time
+from collections.abc import Iterable
+from contextlib import suppress
+from dataclasses import asdict, is_dataclass
+from typing import Any, Final
 
-from fastapi import FastAPI, Form, Request
+import uvicorn
+from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Histogram,
+    generate_latest,
+)
+from pydantic import BaseModel, Field
 from starlette.templating import Jinja2Templates
 
-from services.app_server.middleware import (
-    BodySizeLimitMiddleware,
-    RateLimitMiddleware,
-)
+from services.app_server.auth import ApiKeyRequiredMiddleware
+from services.app_server.middleware import BodySizeLimitMiddleware, RateLimitMiddleware
 from services.app_server.store import append_task, recent_tasks
+from services.model_router.registry import choose as router_choose
+from services.policy_engine.engine import evaluate as policy_evaluate
+from services.queue import sqlite_queue as _qq
+from services.queue.sqlite_queue import enqueue as q_enqueue
+from services.queue.sqlite_queue import load as q_load
+
+# --- internal helpers for safety & typing ---
+ALLOWED_TABLES: Final[set[str]] = {"tasks", "jobs", "results"}
+ALLOWED_COLUMNS: Final[set[str]] = {"payload", "payload_json", "result_json"}
+
+
+def _safe_ident(name: str, allowed: Iterable[str]) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError("Unsafe identifier")
+    if name not in allowed:
+        raise ValueError("Identifier not in allow-list")
+    return name
+
+
+def _as_int(x: Any) -> int:
+    if isinstance(x, int):
+        return x
+    if isinstance(x, str) and x.isdigit():
+        return int(x)
+    raise ValueError("job_id must be an int string or int")
+
+
+# ---- Prometheus metrics ----
+REGISTRY = CollectorRegistry()
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "path", "status"],
+    registry=REGISTRY,
+)
+
+# canonical name expected by tests
+REQUEST_LATENCY_SECONDS = Histogram(
+    "http_request_latency_seconds",
+    "Request latency in seconds",
+    ["method", "path", "status"],
+    registry=REGISTRY,
+)
+
+# Back-compat alias (if other code references it)
+HTTP_REQUEST_LATENCY_SECONDS = REQUEST_LATENCY_SECONDS
 
 
 class TaskIn(BaseModel):
     task: str
-    payload: dict = {}
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+def _infer_task_db_path() -> str:
+    return os.environ.get("TASK_DB", os.path.join("data", "pointers", "tasks.db"))
+
+
+def _maybe_to_dict(obj: Any) -> Any:
+    """Try to convert router/choice objects to a JSON-serializable dict."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict | list | str | int | float | bool):
+        return obj
+    if is_dataclass(obj):
+        with suppress(Exception):
+            return asdict(obj)
+    to_dict = getattr(obj, "to_dict", None)
+    if callable(to_dict):
+        with suppress(Exception):
+            return to_dict()
+    d = getattr(obj, "__dict__", None)
+    if isinstance(d, dict) and d:
+        out = {}
+        for k, v in d.items():
+            if k.startswith("_"):
+                continue
+            out[k] = _maybe_to_dict(v)
+        return out
+    with suppress(Exception):
+        return json.loads(json.dumps(obj, default=str))
+    return str(obj)
+
+
+def _extract_model_name(route_obj: Any) -> dict[str, Any]:
+    """Return {"name": <model_name>} from a variety of object shapes."""
+    if isinstance(route_obj, dict):
+        agent = route_obj.get("agent")
+        if isinstance(agent, dict) and "name" in agent:
+            return {"name": agent["name"]}
+        if "model_name" in route_obj:
+            return {"name": route_obj["model_name"]}
+        if "name" in route_obj:
+            return {"name": route_obj["name"]}
+
+    name: str | None = None
+    agent = getattr(route_obj, "agent", None)
+    if agent is not None:
+        if isinstance(agent, dict) and "name" in agent:
+            return {"name": agent["name"]}
+        if hasattr(agent, "name"):
+            with suppress(Exception):
+                name = agent.name
+    if not name and hasattr(route_obj, "model_name"):
+        with suppress(Exception):
+            name = route_obj.model_name
+    if not name and hasattr(route_obj, "name"):
+        with suppress(Exception):
+            name = route_obj.name
+    return {"name": name or "mini-phi"}
+
+
+def q_get_result(job_id: str) -> dict[str, Any] | None:
+    """
+    1) queue.load(job_id)
+    2) other likely accessors on services.queue.sqlite_queue
+    3) raw SQLite probe
+    """
+    with suppress(Exception):
+        job_val: int | str = int(job_id) if str(job_id).isdigit() else job_id
+        val = q_load(job_val)
+        if val is not None:
+            return val if isinstance(val, dict) else {"result": val}
+
+    for name in (
+        "get_result",
+        "result",
+        "fetch_result",
+        "read_result",
+        "result_for",
+        "lookup_result",
+        "get",
+        "get_job_result",
+        "job_result",
+        "read_job_result",
+    ):
+        fn = getattr(_qq, name, None)
+        if callable(fn):
+            with suppress(Exception):
+                val = fn(job_id)
+                if val is not None:
+                    return val if isinstance(val, dict) else {"result": val}
+
+    db_path = _infer_task_db_path()
+    if not os.path.exists(db_path):
+        return None
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [r[0] for r in cur.fetchall()]
+        for tbl in tables:
+            cur.execute(f"PRAGMA table_info({tbl})")
+            cols = [r[1] for r in cur.fetchall()]
+            if "job_id" not in cols:
+                continue
+            for json_col in ("result", "item", "data", "payload", "value"):
+                if json_col not in cols:
+                    continue
+                with suppress(Exception):
+                    cur.execute(
+                        f"SELECT {json_col} FROM {tbl} WHERE job_id=? ORDER BY ROWID DESC LIMIT 1",  # nosec B608
+                        (job_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        continue
+                    val = row[0]
+                    if isinstance(val, bytes | bytearray):
+                        val = val.decode("utf-8", errors="ignore")
+                    if isinstance(val, str):
+                        with suppress(Exception):
+                            return json.loads(val)
+                        return {"result": val}
+                    if isinstance(val, dict):
+                        return val
+                    return {"result": val}
+    except Exception:
+        return None
+    finally:
+        with suppress(Exception):
+            if conn is not None:
+                conn.close()
+    return None
 
 
 def create_app() -> FastAPI:
     app = FastAPI()
 
+    # ---- Metrics middleware ----
+    @app.middleware("http")
+    async def metrics_middleware(request: Request, call_next):
+        start = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = getattr(response, "status_code", 500)
+            return response
+        finally:
+            elapsed = time.perf_counter() - start
+            path = request.url.path
+            method = request.method
+            HTTP_REQUESTS_TOTAL.labels(
+                method=method, path=path, status=str(status_code)
+            ).inc()
+            HTTP_REQUEST_LATENCY_SECONDS.labels(
+                method=method, path=path, status=str(status_code)
+            ).observe(elapsed)
+
+    # ---- Health ----
     @app.get("/health")
     def health():
         return {"ok": True, "app": "velu"}
 
-    # security middleware
-    app.add_middleware(BodySizeLimitMiddleware)
+    # ---- Security middleware ----
     app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(ApiKeyRequiredMiddleware)
 
-    # CORS allowlist via env
+    # ---- CORS ----
     _origins = os.environ.get("CORS_ORIGINS", "")
     allowed = [o.strip() for o in _origins.split(",") if o.strip()]
     app.add_middleware(
@@ -41,24 +260,56 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ---------- Templates ----------
+    templates = Jinja2Templates(directory="services/app_server/templates")
+
     # ---------- API ----------
     @app.options("/tasks")
     def tasks_preflight():
         return {}
 
     @app.post("/tasks")
-    def accept_task(t: TaskIn):
-        d = t.model_dump()
+    def accept_task(d: dict[str, Any], request: Request):
         append_task(d)
-        return {"ok": True, "received": d}
+        api_key = request.headers.get("x-api-key")
+        job_id = q_enqueue(d, key=api_key[:64] if api_key else None)
+        if os.environ.get("DISPATCH_SYNC", "0") == "1":
+            route_obj = router_choose(
+                {"task": d.get("task"), "payload": d.get("payload") or {}}
+            )
+            return {
+                "ok": True,
+                "job_id": job_id,
+                "received": d,
+                "route": _maybe_to_dict(route_obj),
+            }
+        return {"ok": True, "job_id": job_id, "received": d}
 
     @app.get("/tasks")
     def list_tasks(limit: int = 50):
         return {"ok": True, "items": recent_tasks(limit=limit)}
 
-    # ---------- UI ----------
-    templates = Jinja2Templates(directory="services/app_server/templates")
+    @app.post("/route/preview")
+    def route_preview(d: TaskIn):
+        policy = policy_evaluate({"task": d.task, "payload": d.payload or {}})
+        route_obj = router_choose({"task": d.task, "payload": d.payload or {}})
+        model = _extract_model_name(route_obj)
+        route = _maybe_to_dict(route_obj)
+        return {"ok": True, "policy": policy, "route": route, "model": model}
 
+    @app.get("/results/{job_id}")
+    def get_result(job_id: str):
+        res = q_get_result(job_id)
+        if res is None:
+            raise HTTPException(status_code=404, detail="not ready")
+        return {"ok": True, "item": res}
+
+    # ---- Prometheus endpoint ----
+    @app.get("/metrics")
+    def metrics():
+        return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
+
+    # ---------- UI ----------
     @app.get("/")
     def home_redirect():
         return RedirectResponse(url="/ui/tasks", status_code=307)
@@ -67,17 +318,37 @@ def create_app() -> FastAPI:
     def ui_list_tasks(request: Request, limit: int = 50):
         items = recent_tasks(limit=limit)
         for it in items:
-            if isinstance(it.get("payload"), (dict, list)):
+            if isinstance(it.get("payload"), dict | list):
                 it["payload"] = json.dumps(it["payload"], ensure_ascii=False)
-        return templates.TemplateResponse("tasks.html", {"request": request, "items": items})
+        return templates.TemplateResponse(
+            "tasks.html", {"request": request, "items": items}
+        )
+
+    @app.get("/ui/submit")
+    def ui_submit(request: Request):
+        return templates.TemplateResponse("submit.html", {"request": request})
+
+    @app.get("/ready")
+    def ready():
+        """Return 200 if the app can talk to the task DB; else 503."""
+        db_path = os.environ.get("TASK_DB", "data/tasks.db")
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+            _ = cur.fetchone()
+            conn.close()
+            return {"ok": True, "db": db_path}
+        except Exception as e:  # pragma: no cover
+            raise HTTPException(status_code=503, detail=f"db not ready: {e}") from e
 
     @app.post("/ui/tasks")
     def ui_create_task(task: str = Form(...), payload: str = Form("{}")):
-        try:
+        with suppress(Exception):
             data = json.loads(payload or "{}")
-        except Exception:
-            data = {"raw": payload}
-        append_task({"task": task, "payload": data})
+            append_task({"task": task, "payload": data})
+            return RedirectResponse(url="/ui/tasks", status_code=303)
+        append_task({"task": task, "payload": {"raw": payload}})
         return RedirectResponse(url="/ui/tasks", status_code=303)
 
     return app
@@ -86,6 +357,9 @@ def create_app() -> FastAPI:
 app = create_app()
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    uvicorn.run(
+        app,
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "8000")),
+        reload=os.environ.get("UVICORN_RELOAD", "1") == "1",
+    )

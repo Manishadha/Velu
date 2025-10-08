@@ -85,3 +85,4 @@ webcolors==24.11.1
 python-multipart
 
 python-multipart>=0.0.9
+prometheus-client>=0.20.0

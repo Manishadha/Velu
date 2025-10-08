@@ -1,24 +1,31 @@
+# Python
 __pycache__/
+*.py[cod]
 *.pyc
 .venv/
-venv/
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-.coverage
-dist/
-build/
-*.egg-info/
-.history/
-.vscode/*.log
-*.env
-*.env.*
-ops/config/*.env
-data/models/*
-!data/models/.gitkeep
-data/rules/*
-!data/rules/.gitkeep
-data/threat-intel/*
-!data/threat-intel/.gitkeep
-sbom.xml
-data/pointers/tasks.log
+.cache/
+
+# Env & secrets (DO NOT COMMIT)
+.env
+.env.*
+monitoring/prom_basic_pass.txt
+
+# SQLite data (local & volumes)
+*.sqlite3
+*.db
+**/*.db
+**/*.db-*
+data/
+data/**
+
+# Docker / runtime state
+*.log
+*.pid
+docker-compose.override.yml
+caddy_data/
+caddy_config/
+config/  # if any runtime config gets written here
+
+# Node (if present)
+node_modules/
+.dist/

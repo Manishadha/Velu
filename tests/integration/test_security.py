@@ -17,7 +17,7 @@ def test_cors_headers_present(monkeypatch):
         },
     )
     assert r.status_code in (200, 204)
-    assert "access-control-allow-origin" in {k.lower() for k in r.headers.keys()}
+    assert "access-control-allow-origin" in {k.lower() for k in r.headers}
 
 
 def test_payload_too_large(monkeypatch, tmp_path):

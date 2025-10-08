@@ -1,16 +1,30 @@
 repos:
-    - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.6.4
-      # yamllint disable-line rule:braces
-      hooks: [{ id: ruff }, { id: ruff-format }]
-    - repo: https://github.com/pre-commit/pre-commit-hooks
-      rev: v4.6.0
-      hooks:
-          - id: end-of-file-fixer
-            exclude: ^data/pointers/.*\.log$
-          - id: trailing-whitespace
-          - id: check-added-large-files
-    - repo: https://github.com/adrienverge/yamllint
-      rev: v1.35.1
-      # yamllint disable-line rule:braces
-      hooks: [{ id: yamllint }]
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    # yamllint disable-line rule:braces
+    hooks: [{ id: black }]
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    # yamllint disable-line rule:braces
+    hooks: [{ id: hadolint }]
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    # yamllint disable-line rule:braces
+    hooks: [{ id: yamllint }]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+    failure-threshold: error
+    ignore:
+      - DL3008
+      - DL3013
+      - DL3042
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        args:
+          - --failure-threshold=error
+          - --ignore=DL3008,DL3013,DL3042

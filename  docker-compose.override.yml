@@ -1,0 +1,13 @@
+services:
+    worker:
+        build: .
+        image: velu-app:latest
+        command: python -m services.worker.main
+        environment:
+            TASK_DB: /data/tasks.db
+            TASK_LOG: /data/tasks.log
+            RULES_DIR: /app/data/rules
+        volumes:
+            - ./data:/data
+        depends_on:
+            - app

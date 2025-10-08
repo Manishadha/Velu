@@ -1,51 +1,149 @@
-services:
-    orchestrator:
-        build:
-            context: .
-            dockerfile: ops/docker/orchestrator.Dockerfile
-        env_file:
-            - ops/config/dev.env
-        volumes:
-            - .:/app
-        depends_on:
-            api:
-                condition: service_healthy
-        command:
-            [
-                "python",
-                "-u",
-                "-c",
-                "import time; print('orchestrator idle'); time.sleep(10**9)",
-            ]
+version: "3.9"
 
-    api:
-        build:
-            context: .
-            dockerfile: ops/docker/api.Dockerfile
-        volumes:
-            - .:/app
-        ports:
-            - "8000:8000"
-        env_file:
-            - ops/config/dev.env
-        command:
-            [
-                "uvicorn",
-                "services.app_server.main:app",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8000",
-                "--reload",
-            ]
-        healthcheck:
-            test:
-                [
-                    "CMD",
-                    "python",
-                    "-c",
-                    "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()",
-                ]
-            interval: 10s
-            timeout: 3s
-            retries: 5
+services:
+  app:
+    build: .
+    image: velu-app:latest
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      API_KEYS: ${API_KEYS}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      HOST: ${HOST}
+      PORT: ${PORT}
+      TASK_DB: ${TASK_DB}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    volumes:
+      - data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  worker:
+    image: velu-app:latest
+    command: ["python", "-m", "services.queue.worker_entry"]
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      TASK_DB: ${TASK_DB}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    volumes:
+      - data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://app:8000/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # --- Caddy (reverse proxy) ---
+  caddy:
+    image: caddy:2
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+    volumes:
+      # If your Caddyfile is at repo root:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # If you truly keep it under ./caddy/, replace the line above with:
+      # - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  # --- Prometheus ---
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    depends_on:
+      - caddy
+    ports:
+      - "127.0.0.1:9090:9090"
+    user: "65534:65534" # nobody:nogroup
+    read_only: true
+    tmpfs:
+      - /prometheus:rw,noexec,nosuid,nodev,mode=1777
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prom_basic_pass.txt:/etc/prometheus/prom_basic_pass.txt:ro
+      # If you later add alert rules:
+      # - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    restart: unless-stopped
+
+  # --- Grafana ---
+  grafana:
+    image: grafana/grafana:10.4.5
+    depends_on:
+      - prometheus
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+  # --- SQLite backup ---
+  sqlite_backup:
+    image: velu-app:latest
+    container_name: velu-sqlite-backup
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RETENTION_DAYS: "14"
+      TASK_DB: /data/jobs.db
+    command: ["python", "/app/scripts/sqlite_backup.py"]
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: ["ALL"]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python - <<'PY'\nimport glob,sys\nb=glob.glob('/data/backups/jobs-*.db')\nprint('found',len(b))\nsys.exit(0 if b else 1)\nPY",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+secrets:
+  prom_basic_pass.txt:
+    file: ./monitoring/prom_basic_pass.txt
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
+  grafana_data:
