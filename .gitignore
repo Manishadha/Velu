@@ -29,3 +29,8 @@ config/  # if any runtime config gets written here
 # Node (if present)
 node_modules/
 .dist/
+.run/
+.pytest_cache/
+dist/
+build/
+

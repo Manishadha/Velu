@@ -1,3 +1,4 @@
+# services/agents/__init__.py
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -14,3 +15,10 @@ HANDLERS: dict[str, Handler] = {
     "report": reporter.handle,
     "codegen": codegen.handle,
 }
+
+
+def get_handler(name: str) -> Handler:
+    try:
+        return HANDLERS[name]
+    except KeyError as e:
+        raise KeyError(f"unknown task: {name}") from e

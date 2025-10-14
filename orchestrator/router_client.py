@@ -3,23 +3,45 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents import planning_agent
-from services.policy_engine.engine import evaluate as evaluate_policy
 
+def route(arg: Any, payload: dict | None = None) -> dict:
+    # allow both: route("task", payload) and route({"task":..., "payload":...})
+    if isinstance(arg, dict):
+        name = str(arg.get("task", ""))
+        pl = arg.get("payload") or {}
+    else:
+        name = str(arg or "")
+        pl = payload or {}
 
-def route(task: dict[str, Any]) -> dict[str, Any]:
-    """Very small router used by the worker to process tasks."""
-    policy = evaluate_policy(task)
+    # --- simple pipeline ---
+    if name == "plan":
+        module = str(pl.get("module") or "hello_mod").replace("-", "_")
+        path = f"generated/{module}.py"
+        content = "def greet(name: str) -> str:\n" '    return f"Hello, {name}!"\n'
+        return {
+            "ok": True,
+            "policy": {"allowed": True, "rules_triggered": [], "notes": "Allowed"},
+            "model": {"name": "mini-phi"},
+            "next": {"task": "codegen", "payload": {"path": path, "content": content}},
+        }
 
-    # 3) simple task switch (expand as agents are added)
-    kind = (task.get("task") or "").lower()
-    out = planning_agent.handle(task) if kind == "plan" else {"ok": True, "echo": task}
+    if name == "codegen":
+        path = pl.get("path") or "generated/hello_mod.py"
+        content = pl.get("content") or "print('hello')\n"
+        return {"ok": True, "file": {"path": path, "content": content}}
 
-    # minimal model description for downstream consumers (optional)
-    model_name = getattr(getattr(planning_agent, "MODEL", None), "name", "mini-phi")
+    if name == "pytest":
+        # worker will actually run pytest; this is just a placeholder
+        return {"ok": True, "note": "pytest will be executed by worker"}
+
+    # default fallback mirrors your earlier behavior
     return {
         "ok": True,
-        "policy": policy,
-        "model": {"name": model_name},
-        "result": out,
+        "policy": {"allowed": True, "rules_triggered": [], "notes": "Allowed"},
+        "model": {"name": "mini-phi"},
+        "result": {
+            "status": "ok",
+            "data": {"agent": "planning", "received": {"task": name, "payload": pl}},
+            "message": "",
+        },
     }

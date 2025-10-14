@@ -1,34 +1,14 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Submit Task</title>
-    <style>
-      body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; }
-      label { display:block; margin-top: 1rem; font-weight: 600; }
-      textarea, input[type=text] { width:100%; font-family: monospace; }
-      .row { display:flex; gap:8px; align-items:center; }
-      .row > * { flex: 1 1 auto; }
-      .hint { color:#666; font-size: .9rem; }
-    </style>
-  </head>
-  <body>
-    <h1>Submit Task</h1>
-
-    <form method="post" action="/ui/tasks">
-      <label>Task name</label>
-      <input type="text" name="task" value="report" required />
-
-      <label>Payload (JSON)</label>
-      <textarea name="payload" rows="6" cols="60" spellcheck="false" style="font-family:monospace;">{"title": "Build report", "data": {"ok": true}}</textarea>
-      <input type="hidden" name="content-type" value="application/json">
-
-
-      <div class="row" style="margin-top:1rem">
-        <button type="submit">Submit</button>
-        <a href="/ui/tasks">View tasks</a>
-      </div>
-      <p class="hint">This posts to <code>/ui/tasks</code> and redirects to the task list.</p>
-    </form>
-  </body>
+<head><meta charset="utf-8"><title>Submit</title></head>
+<body>
+  <h1>Submit a Task</h1>
+  <form action="/ui/tasks" method="post">
+    <label>Task: <input name="task" value="plan" /></label><br/>
+    <label>Payload (JSON):</label><br/>
+    <textarea name="payload" rows="8" cols="60">{"idea":"demo pipeline","module":"hello_mod"}</textarea><br/>
+    <button type="submit">Submit</button>
+  </form>
+  <p><a href="/ui/tasks">Back to tasks</a></p>
+</body>
 </html>

@@ -1,3 +1,4 @@
+
 services:
   app:
     build: .
@@ -23,23 +24,6 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
-    volumes:
-      - ./data:/data
-  sqlite_backup:
-    image: velu-app:latest
-    depends_on:
-      app:
-        condition: service_healthy
-    environment:
-      RETENTION_DAYS: "14"
-      TASK_DB: /data/jobs.db
-      BACKUP_INTERVAL_SECONDS: "10"   # quick visibility; raise later
-    command: ["python", "/app/scripts/sqlite_backup.py"]
-    read_only: true
-    tmpfs: ["/tmp"]
-    volumes:
-      - ./data:/data
-
 
   worker:
     image: velu-app:latest
@@ -53,12 +37,13 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs: ["/tmp"]
-    volumes:
-      - ./data:/data
-
 secrets:
   prom_basic_pass.txt:
     file: ./monitoring/prom_basic_pass.txt
+
+volumes:
+  caddy_config:
+  grafana_data:
 
 volumes:
   caddy_data:

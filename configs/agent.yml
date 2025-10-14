@@ -1,0 +1,37 @@
+repo:
+  path_env: VELU_REPO_PATH
+  default_path: ~/Downloads/velu
+
+branching:
+  default_target: dev
+  protected: [ main ]
+  patterns:
+    feature: "feat/{scope}"
+    fix: "fix/{scope}"
+    chore: "chore/{scope}"
+    docs: "docs/{scope}"
+    refactor: "refactor/{scope}"
+    hotfix: "hotfix/{scope}"
+
+commits:
+  conventional: true
+  sign: ${VELU_GIT_SIGN:-0}
+  coauthored: false
+  body_prefix: "Generated-by: Velu Agent"
+
+changelog:
+  path: docs/CHANGELOG.md
+  keep_a_changelog: true
+
+versioning:
+  scheme: semver
+  tag_prefix: v
+  bump:
+    major: "BREAKING CHANGE"
+    minor: "feat"
+    patch: "fix"
+
+ci:
+  push: ${VELU_GIT_PUSH:-1}
+  open_pr: true
+  run_local_tests: true

@@ -7,14 +7,14 @@ import re
 import sqlite3
 import time
 from collections.abc import Iterable
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict, is_dataclass
 from typing import Any, Final
 
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
@@ -25,6 +25,7 @@ from prometheus_client import (
 from pydantic import BaseModel, Field
 from starlette.templating import Jinja2Templates
 
+from services.app_server import admin as admin_routes
 from services.app_server.auth import ApiKeyRequiredMiddleware
 from services.app_server.middleware import BodySizeLimitMiddleware, RateLimitMiddleware
 from services.app_server.store import append_task, recent_tasks
@@ -65,7 +66,6 @@ HTTP_REQUESTS_TOTAL = Counter(
     registry=REGISTRY,
 )
 
-# canonical name expected by tests
 REQUEST_LATENCY_SECONDS = Histogram(
     "http_request_latency_seconds",
     "Request latency in seconds",
@@ -191,7 +191,7 @@ def q_get_result(job_id: str) -> dict[str, Any] | None:
                     continue
                 with suppress(Exception):
                     cur.execute(
-                        f"SELECT {json_col} FROM {tbl} WHERE job_id=? ORDER BY ROWID DESC LIMIT 1",  # nosec B608
+                        f"SELECT {json_col} FROM {tbl} WHERE job_id=? ORDER BY ROWID DESC LIMIT 1",
                         (job_id,),
                     )
                     row = cur.fetchone()
@@ -217,7 +217,17 @@ def q_get_result(job_id: str) -> dict[str, Any] | None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI()
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # startup
+        try:
+            _qq.init()
+        except Exception as e:  # pragma: no cover
+            print(f"[startup] queue init failed: {e}", flush=True)
+        yield
+        # shutdown (optional): add cleanup here if needed
+
+    app = FastAPI(lifespan=lifespan)
 
     # ---- Metrics middleware ----
     @app.middleware("http")
@@ -239,15 +249,14 @@ def create_app() -> FastAPI:
                 method=method, path=path, status=str(status_code)
             ).observe(elapsed)
 
-    # ---- Health ----
-    @app.get("/health")
-    def health():
-        return {"ok": True, "app": "velu"}
-
     # ---- Security middleware ----
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(BodySizeLimitMiddleware)
-    app.add_middleware(ApiKeyRequiredMiddleware)
+
+    # Only require API key if configured
+    _api_keys = os.environ.get("API_KEYS", "").strip()
+    if _api_keys:
+        app.add_middleware(ApiKeyRequiredMiddleware)
 
     # ---- CORS ----
     _origins = os.environ.get("CORS_ORIGINS", "")
@@ -260,6 +269,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # ---- Admin routes (optional) ----
+    if os.getenv("ADMIN_ROUTES", "0") == "1":
+        app.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
+
     # ---------- Templates ----------
     templates = Jinja2Templates(directory="services/app_server/templates")
 
@@ -270,20 +283,44 @@ def create_app() -> FastAPI:
 
     @app.post("/tasks")
     def accept_task(d: dict[str, Any], request: Request):
-        append_task(d)
-        api_key = request.headers.get("x-api-key")
-        job_id = q_enqueue(d, key=api_key[:64] if api_key else None)
-        if os.environ.get("DISPATCH_SYNC", "0") == "1":
-            route_obj = router_choose(
-                {"task": d.get("task"), "payload": d.get("payload") or {}}
+        def _to_int(val: Any) -> int | None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return None
+
+        try:
+            append_task(d)
+            api_key = request.headers.get("x-api-key")
+            priority = _to_int(d.get("priority")) or 0
+            raw_nb = d.get("not_before")  # epoch seconds; None = ASAP
+            not_before = _to_int(raw_nb)
+
+            job_id = q_enqueue(
+                d,
+                key=(api_key[:64] if api_key else None),
+                priority=priority,
+                not_before=not_before,
             )
-            return {
-                "ok": True,
-                "job_id": job_id,
-                "received": d,
-                "route": _maybe_to_dict(route_obj),
-            }
-        return {"ok": True, "job_id": job_id, "received": d}
+
+            if os.environ.get("DISPATCH_SYNC", "0") == "1":
+                route_obj = router_choose(
+                    {"task": d.get("task"), "payload": d.get("payload") or {}}
+                )
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "received": d,
+                    "route": _maybe_to_dict(route_obj),
+                }
+
+            return {"ok": True, "job_id": job_id, "received": d}
+
+        except Exception as e:
+            return JSONResponse(
+                {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                status_code=500,
+            )
 
     @app.get("/tasks")
     def list_tasks(limit: int = 50):
@@ -309,6 +346,25 @@ def create_app() -> FastAPI:
     def metrics():
         return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
+    # ---- Health/Ready ----
+    @app.get("/health")
+    def health():
+        return {"ok": True, "app": "velu"}
+
+    @app.get("/ready")
+    def ready():
+        """Return 200 if the app can talk to the task DB; else 503."""
+        db_path = os.environ.get("TASK_DB", "data/tasks.db")
+        try:
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
+            _ = cur.fetchone()
+            conn.close()
+            return {"ok": True, "db": db_path}
+        except Exception as e:  # pragma: no cover
+            raise HTTPException(status_code=503, detail=f"db not ready: {e}") from e
+
     # ---------- UI ----------
     @app.get("/")
     def home_redirect():
@@ -328,20 +384,6 @@ def create_app() -> FastAPI:
     def ui_submit(request: Request):
         return templates.TemplateResponse("submit.html", {"request": request})
 
-    @app.get("/ready")
-    def ready():
-        """Return 200 if the app can talk to the task DB; else 503."""
-        db_path = os.environ.get("TASK_DB", "data/tasks.db")
-        try:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' LIMIT 1")
-            _ = cur.fetchone()
-            conn.close()
-            return {"ok": True, "db": db_path}
-        except Exception as e:  # pragma: no cover
-            raise HTTPException(status_code=503, detail=f"db not ready: {e}") from e
-
     @app.post("/ui/tasks")
     def ui_create_task(task: str = Form(...), payload: str = Form("{}")):
         with suppress(Exception):
@@ -354,12 +396,15 @@ def create_app() -> FastAPI:
     return app
 
 
+# Importable for uvicorn --factory
 app = create_app()
 
 if __name__ == "__main__":
+    # Use factory import string so reload/workers are supported cleanly
     uvicorn.run(
-        app,
+        "services.app_server.main:create_app",
+        factory=True,
         host=os.environ.get("HOST", "127.0.0.1"),
-        port=int(os.environ.get("PORT", "8000")),
-        reload=os.environ.get("UVICORN_RELOAD", "1") == "1",
+        port=int(os.environ.get("PORT", "8010")),
+        reload=os.environ.get("UVICORN_RELOAD", "0") == "1",
     )

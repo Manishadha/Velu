@@ -9,3 +9,6 @@
 source .venv/bin/activate
 
 SK_REDACTED
+
+
+ruff check --fix

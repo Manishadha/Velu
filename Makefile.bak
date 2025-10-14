@@ -1,84 +1,101 @@
-.PHONY: setup run test lint audit
-setup: ; bash scripts/setup.sh
-run: ; bash scripts/run.sh
-test: ; bash scripts/test.sh
-lint: ; bash scripts/lint.sh
-audit: ; bash scripts/audit.sh
+# Use ">" as the recipe prefix so we don't rely on literal tab characters
+.RECIPEPREFIX := >
 
-api-up:
-	docker compose up --build api
-api-down:
-	docker compose down
-all-up:
-	docker compose up --build
-all-down:
-	docker compose down
+SHELL := /bin/bash
 
-api:
-	uvicorn services.app_server.main:app --host 0.0.0.0 --port 8000 --reload
+# ---- shared env --------------------------------------------------------------
+export VELU_URL ?= http://127.0.0.1:8010
+export TASK_DB  ?= $(PWD)/.run/jobs.db
+export TASK_LOG ?= $(PWD)/.run/tasks.log
+export API_KEYS ?= dev
 
-api-8001:
-	uvicorn services.app_server.main:app --host 0.0.0.0 --port 8001 --reload
-
-all-up:
-docker compose up --build
-
-all-down:
-docker compose down
-
-api-up:
-docker compose up --build api
-
-api-down:
-docker compose stop api
-
-cli:
-	python -m orchestrator.cli --task plan --payload '{"idea":"hello velu"}' --api http://localhost:8000
-
-cli-docker:
-	docker compose run --rm -e API_URL=http://api:8000 orchestrator python -m orchestrator.cli --task plan --payload '{"idea":"from docker"}'
-
-api-sqlite:
-	TASK_BACKEND=sqlite TASK_DB=./data/pointers/tasks.db \
-	uvicorn services.app_server.main:app --host 0.0.0.0 --port 8000 --reload
-
-APP ?= velu
+APP  ?= velu
 PORT ?= 8000
 IMAGE ?= $(APP):latest
 
-.PHONY: fmt lint type sec test cov build run docker-build docker-run
+.PHONY: help
+help:
+> @echo "Targets:"
+> @echo "  up              - start velu server (uvicorn) and wait for /ready"
+> @echo "  down            - stop server & worker"
+> @echo "  worker          - background worker; N=<jobs> (default 25)"
+> @echo "  plan            - submit demo pipeline and print job ids"
+> @echo "  follow          - follow a job (JOB_ID=<id>)"
+> @echo "  test            - run pytest with API_KEYS unset"
+> @echo "  fmt             - run formatters (optional)"
+> @echo "  lint            - run linters (optional)"
+> @echo "  docker-up       - compose up (all services)"
+> @echo "  docker-down     - compose down"
+> @echo "  docker-logs     - compose logs -f"
+> @echo "  docker-rebuild  - build no-cache & up --force-recreate"
+> @echo "  api             - run uvicorn (dev) on $(PORT)"
+> @echo "  docker-build    - docker build -t $(IMAGE)"
+> @echo "  docker-run      - docker run image mapping $(PORT):8000"
 
-fmt:
-	ruff --fix .
-	ruff format .
+# ---- velu local helpers ------------------------------------------------------
+.PHONY: up
+up:
+> @source ~/.bashrc; velu_server
 
-lint:
-	ruff .
+.PHONY: down
+down:
+> @source ~/.bashrc; velu_stop
 
-type:
-	mypy .
+.PHONY: worker
+worker:
+> @source ~/.bashrc; velu_worker $${N:-25}
 
-sec:
-	bandit -r .
+.PHONY: plan
+plan:
+> @source ~/.bashrc; velu_pipeline hello_mod "demo pipeline"
 
+.PHONY: follow
+follow:
+> @curl -fsS "$(VELU_URL)/results/$(JOB_ID)?follow=2" | jq .
+
+.PHONY: test
 test:
-	pytest -q
+> @env -u API_KEYS PYTHONPATH=src pytest -q
 
-cov:
-	pytest --cov=services --cov-report=term-missing
+.PHONY: fmt
+fmt:
+> @python -m black services || true
 
-build:
-	python -m build
+.PHONY: lint
+lint:
+> @python -m ruff services || true
 
-run:
-	uvicorn services.app_server.main:app --host 0.0.0.0 --port $(PORT)
+# ---- docker / compose helpers ------------------------------------------------
+.PHONY: docker-up
+docker-up:
+> docker compose up -d
 
+.PHONY: docker-down
+docker-down:
+> docker compose down
+
+.PHONY: docker-logs
+docker-logs:
+> docker compose logs -f --tail=200
+
+.PHONY: docker-rebuild
+docker-rebuild:
+> docker compose build --no-cache
+> docker compose up -d --force-recreate
+
+# ---- raw uvicorn / docker image targets -------------------------------------
+.PHONY: api
+api:
+> uvicorn services.app_server.main:app --host 0.0.0.0 --port $(PORT) --reload
+
+.PHONY: docker-build
 docker-build:
-	docker build -t $(IMAGE) .
+> docker build -t $(IMAGE) .
 
+.PHONY: docker-run
 docker-run:
-	docker run --rm -p $(PORT):8000 \
-	  -e CORS_ORIGINS=http://localhost:3000 \
-	  -e TASK_DB=/data/tasks.db \
-	  -v $(PWD)/.data:/data \
-	  $(IMAGE)
+> docker run --rm -p $(PORT):8000 \
+>   -e CORS_ORIGINS=http://localhost:3000 \
+>   -e TASK_DB=/data/tasks.db \
+>   -v $(PWD)/.data:/data \
+>   $(IMAGE)
