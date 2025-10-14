@@ -34,3 +34,4 @@ node_modules/
 dist/
 build/
 
+ops/config/*.env
