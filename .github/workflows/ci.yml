@@ -1,4 +1,10 @@
 name: CI
+
+# Grant GITHUB_TOKEN permission to push to GHCR
+permissions:
+  contents: read
+  packages: write
+
 on:
   push:
     branches: [ main ]
@@ -16,6 +22,8 @@ jobs:
       - run: pip install black ruff
       - run: black --check .
       - run: ruff check .
+      - name: Validate docker-compose renders
+        run: docker compose -f docker-compose.yml config
 
   docker:
     runs-on: ubuntu-latest
@@ -24,10 +32,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+
+      # Login to GHCR with repo owner + GITHUB_TOKEN (now has packages:write)
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Build on PRs only (no push)
