@@ -1,11 +1,11 @@
 name: CI
-
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, dev ]
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -17,10 +17,9 @@ jobs:
       - run: black --check .
       - run: ruff check .
 
-  docker-build:
+  docker:
     runs-on: ubuntu-latest
     env:
-      IMAGE_OWNER: ${{ github.repository_owner }}   # we'll lowercase in bash
       IMAGE_NAME: velu-app
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +29,38 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build on PRs only (no push)
       - name: Build (no push)
+        if: github.event_name == 'pull_request'
         run: |
-          owner_lc="${IMAGE_OWNER,,}"  # bash lowercase; avoids toLower() schema fuss
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
           docker buildx build \
-            --tag "ghcr.io/${owner_lc}/${IMAGE_NAME}:sha-${GITHUB_SHA}" \
+            --platform linux/amd64 \
             --provenance=false \
-            --load \
-            .
+            --tag "ghcr.io/${owner_lc}/${IMAGE_NAME}:sha-${GITHUB_SHA}" \
+            --load .
+
+      # Build & push on main
+      - name: Build & Push (main → :latest and :sha)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:latest" \
+            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:sha-${GITHUB_SHA}" \
+            --push .
+
+      # Build & push on tags vX.Y.Z
+      - name: Build & Push (tag → :vX.Y.Z)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          tag="${GITHUB_REF#refs/tags/}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --provenance=false \
+            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:${tag}" \
+            --push .
