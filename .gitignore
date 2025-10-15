@@ -35,3 +35,4 @@ dist/
 build/
 
 ops/config/*.env
+.local-env/
