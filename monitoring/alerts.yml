@@ -1,0 +1,26 @@
+groups:
+  - name: velu
+    rules:
+      - alert: APIHighErrors
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (path) > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "API 5xx detected"
+          description: "Path {{ $labels.path }} has 5xx responses (>0 in 5m)."
+
+      - alert: WorkerUnhealthy
+        expr: up == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Worker container down"
+          description: "Prometheus cannot scrape one or more targets."
+
+      - alert: NoRecentSqliteBackup
+        expr: (time() - max(http_requests_created{path="/metrics"}) by () ) > 7200
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "No recent backup observed"
+          description: "Last observed app /metrics is older than 2h; verify backup job."
