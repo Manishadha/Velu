@@ -185,9 +185,7 @@ def _task_run_tests(rec: dict) -> dict:
             "using": {"code_job_id": code_job_id, "code_result": code_result},
         }
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}"
-        ) from e
+        raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
 
 
 # ---------- main dispatcher ----------
@@ -232,9 +230,12 @@ def main() -> None:
     processed = 0
 
     # optional caps via env
-    run_once = "WORKER_RUN_ONCE" in os.environ and os.environ[
-        "WORKER_RUN_ONCE"
-    ].lower() not in {"0", "", "false", "no"}
+    run_once = "WORKER_RUN_ONCE" in os.environ and os.environ["WORKER_RUN_ONCE"].lower() not in {
+        "0",
+        "",
+        "false",
+        "no",
+    }
     max_jobs_env = os.getenv("WORKER_MAX_JOBS", "").strip()
     try:
         max_jobs = int(max_jobs_env) if max_jobs_env else None

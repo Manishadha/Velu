@@ -19,9 +19,7 @@ def test_post_requires_key_when_configured(monkeypatch, tmp_path):
     assert r.json()["detail"] == "missing or invalid api key"
 
     # Bad key -> 401
-    r = c.post(
-        "/tasks", json={"task": "plan", "payload": {}}, headers={"X-API-Key": "nope"}
-    )
+    r = c.post("/tasks", json={"task": "plan", "payload": {}}, headers={"X-API-Key": "nope"})
     assert r.status_code == 401
 
     # Good key -> 200

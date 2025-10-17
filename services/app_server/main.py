@@ -242,9 +242,7 @@ def create_app() -> FastAPI:
             elapsed = time.perf_counter() - start
             path = request.url.path
             method = request.method
-            HTTP_REQUESTS_TOTAL.labels(
-                method=method, path=path, status=str(status_code)
-            ).inc()
+            HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=str(status_code)).inc()
             HTTP_REQUEST_LATENCY_SECONDS.labels(
                 method=method, path=path, status=str(status_code)
             ).observe(elapsed)
@@ -376,9 +374,7 @@ def create_app() -> FastAPI:
         for it in items:
             if isinstance(it.get("payload"), dict | list):
                 it["payload"] = json.dumps(it["payload"], ensure_ascii=False)
-        return templates.TemplateResponse(
-            "tasks.html", {"request": request, "items": items}
-        )
+        return templates.TemplateResponse("tasks.html", {"request": request, "items": items})
 
     @app.get("/ui/submit")
     def ui_submit(request: Request):

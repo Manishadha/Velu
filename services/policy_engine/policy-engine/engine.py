@@ -15,8 +15,7 @@ def _scan() -> list[dict[str, Any]]:
     global _last_scan, _cache
     try:
         latest = max(
-            [os.path.getmtime(p) for p in glob.glob(os.path.join(RULES_DIR, "*.json"))]
-            + [0.0]
+            [os.path.getmtime(p) for p in glob.glob(os.path.join(RULES_DIR, "*.json"))] + [0.0]
         )
     except ValueError:
         latest = 0.0
@@ -35,9 +34,7 @@ def _scan() -> list[dict[str, Any]]:
     return _cache
 
 
-def evaluate(
-    task: dict[str, Any], context: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def evaluate(task: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Very simple allow/deny evaluator.
     Structure of a rule pack:
