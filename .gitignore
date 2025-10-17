@@ -20,9 +20,11 @@ monitoring/prom_basic_pass.txt
 **/*-journal
 
 # Ignore data but allow overlay code in data/src/
-data/*
 !data/src/
-!data/src/**
+!data/src/local_tasks.py
+!data/src/sitecustomize.py
+data/src/**/__pycache__/
+data/src/**/*.py[cod]
 
 # Docker / runtime state
 *.log
