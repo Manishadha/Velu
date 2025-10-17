@@ -15,9 +15,7 @@ from agents.git_agent.agent import GitIntegrationAgent
 
 def _init_repo(tmp: Path) -> None:
     subprocess.check_call(["git", "init", "-b", "dev"], cwd=tmp)
-    (tmp / ".gitignore").write_text(
-        ".run/\n.venv/\n__pycache__/\n.pytest_cache/\n.env\n"
-    )
+    (tmp / ".gitignore").write_text(".run/\n.venv/\n__pycache__/\n.pytest_cache/\n.env\n")
     (tmp / "configs").mkdir(parents=True, exist_ok=True)
 
     # copy baseline config if exists; else minimal fallback

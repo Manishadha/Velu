@@ -37,9 +37,7 @@ def _rate_key_for_api_key(request: Request) -> tuple[str, str]:
     # fallback to IP bucket
     fwd = request.headers.get("x-forwarded-for")
     host = (
-        fwd.split(",")[0].strip()
-        if fwd
-        else (request.client.host if request.client else "unknown")
+        fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
     )
     return (f"ip:{host}", "ip")
 
@@ -52,24 +50,18 @@ class ApiKeyRequiredMiddleware(BaseHTTPMiddleware):
 
         if not _need_auth(request.url.path, request.method):
             # Tell rate-limiter to use API-key bucket if present
-            request.state.rate_bucket, request.state.rate_label = _rate_key_for_api_key(
-                request
-            )
+            request.state.rate_bucket, request.state.rate_label = _rate_key_for_api_key(request)
             return await call_next(request)
 
         keys = _keys()
         # If no keys configured, allow all (development mode)
         if not keys:
-            request.state.rate_bucket, request.state.rate_label = _rate_key_for_api_key(
-                request
-            )
+            request.state.rate_bucket, request.state.rate_label = _rate_key_for_api_key(request)
             return await call_next(request)
 
         provided = request.headers.get("x-api-key")
         if not provided or provided not in keys:
-            return JSONResponse(
-                {"detail": "missing or invalid api key"}, status_code=401
-            )
+            return JSONResponse({"detail": "missing or invalid api key"}, status_code=401)
 
         request.state.rate_bucket, request.state.rate_label = (
             f"apk:{provided[:6]}…",

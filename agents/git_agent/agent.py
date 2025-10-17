@@ -172,9 +172,7 @@ def push_branch(repo: Path, name: str) -> None:
         raise RuntimeError(err or "git push failed")
 
 
-def open_pr(
-    repo: Path, from_branch: str, to_branch: str, title: str, body: str
-) -> None:
+def open_pr(repo: Path, from_branch: str, to_branch: str, title: str, body: str) -> None:
     if not gh_available() or not has_remote_origin(repo):
         return
     cmd = (
@@ -292,11 +290,7 @@ class GitIntegrationAgent:
             raise RuntimeError(err or "cannot pull main")
 
         ch_path = self.repo / self.cfg.changelog_path
-        text = (
-            ch_path.read_text()
-            if ch_path.exists()
-            else "# Changelog\n\n## [Unreleased]\n"
-        )
+        text = ch_path.read_text() if ch_path.exists() else "# Changelog\n\n## [Unreleased]\n"
         if "## [Unreleased]" in text:
             today = date.today().isoformat()
             new = text.replace(
@@ -318,9 +312,7 @@ class GitIntegrationAgent:
             rc, _out, err = git("push origin main", cwd=self.repo)
             if rc != 0:
                 raise RuntimeError(err or "push main failed")
-            rc, _out, err = git(
-                f"push origin {self.cfg.tag_prefix}{version}", cwd=self.repo
-            )
+            rc, _out, err = git(f"push origin {self.cfg.tag_prefix}{version}", cwd=self.repo)
             if rc != 0:
                 raise RuntimeError(err or "push tag failed")
 

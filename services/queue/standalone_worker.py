@@ -33,9 +33,7 @@ def claim_one_job(conn: sqlite3.Connection):
     """
     conn.isolation_level = None  # manual transactions
     conn.execute("BEGIN IMMEDIATE")
-    cur = conn.execute(
-        "SELECT id, task FROM jobs WHERE status='queued' ORDER BY id ASC LIMIT 1"
-    )
+    cur = conn.execute("SELECT id, task FROM jobs WHERE status='queued' ORDER BY id ASC LIMIT 1")
     row = cur.fetchone()
     if not row:
         conn.execute("COMMIT")
@@ -99,9 +97,7 @@ def main():
 
             job_id, task_json = claimed
             try:
-                task_obj = (
-                    json.loads(task_json) if isinstance(task_json, str) else task_json
-                )
+                task_obj = json.loads(task_json) if isinstance(task_json, str) else task_json
                 result = process_task(task_obj)
                 complete_job(conn, job_id, result, None)
                 print(f"worker: done {job_id}", flush=True)

@@ -15,8 +15,16 @@ monitoring/prom_basic_pass.txt
 *.db
 **/*.db
 **/*.db-*
-data/
-data/**
+**/*-wal
+**/*-shm
+**/*-journal
+
+# Ignore data but allow overlay code in data/src/
+!data/src/
+!data/src/local_tasks.py
+!data/src/sitecustomize.py
+data/src/**/__pycache__/
+data/src/**/*.py[cod]
 
 # Docker / runtime state
 *.log
@@ -24,7 +32,7 @@ data/**
 docker-compose.override.yml
 caddy_data/
 caddy_config/
-config/  # if any runtime config gets written here
+config/
 
 # Node (if present)
 node_modules/
@@ -34,5 +42,6 @@ node_modules/
 dist/
 build/
 
+# Local ops env
 ops/config/*.env
 .local-env/

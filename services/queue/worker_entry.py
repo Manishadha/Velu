@@ -63,9 +63,7 @@ def _db_pop_one() -> dict[str, Any] | None:
             con.close()
 
 
-def _db_done(
-    jid: int, result: dict[str, Any] | None, err: dict[str, Any] | None
-) -> None:
+def _db_done(jid: int, result: dict[str, Any] | None, err: dict[str, Any] | None) -> None:
     con = _connect()
     cur = con.cursor()
     try:

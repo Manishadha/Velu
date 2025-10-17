@@ -20,9 +20,7 @@ FORBIDDEN_PATTERNS = [
 ]
 
 
-def shell(
-    cmd: str, cwd: Path | None = None, env: dict | None = None
-) -> tuple[int, str, str]:
+def shell(cmd: str, cwd: Path | None = None, env: dict | None = None) -> tuple[int, str, str]:
     proc = subprocess.Popen(  # noqa: S603
         shlex.split(cmd),
         cwd=str(cwd) if cwd else None,
@@ -59,9 +57,7 @@ def has_remote_origin(cwd: Path) -> bool:
     return rc == 0
 
 
-def git(
-    *args: str, cwd: Path | None = None, env: dict | None = None
-) -> tuple[int, str, str]:
+def git(*args: str, cwd: Path | None = None, env: dict | None = None) -> tuple[int, str, str]:
     return shell("git " + " ".join(args), cwd=cwd, env=env)
 
 

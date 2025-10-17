@@ -17,9 +17,7 @@ def handle_git_task(task: dict[str, Any]) -> dict[str, Any]:
     action = task.get("action")
 
     if action == "feature":
-        branch = agent.feature_commit(
-            task["scope"], task["summary"], task.get("body", "")
-        )
+        branch = agent.feature_commit(task["scope"], task["summary"], task.get("body", ""))
         return {"ok": True, "branch": branch}
 
     if action == "fix":
@@ -27,9 +25,7 @@ def handle_git_task(task: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True, "branch": branch}
 
     if action == "chore":
-        branch = agent.chore_commit(
-            task["scope"], task["summary"], task.get("body", "")
-        )
+        branch = agent.chore_commit(task["scope"], task["summary"], task.get("body", ""))
         return {"ok": True, "branch": branch}
 
     if action == "release":
