@@ -1,0 +1,13 @@
+{"task": "plan", "payload": {"i": 0}}
+{"task": "plan", "payload": {"i": 1}}
+{"task": "plan", "payload": {"idea": "test"}}
+{"task": "plan", "payload": {"i": 0}}
+{"task": "plan", "payload": {"i": 1}}
+{"task": "plan", "payload": {"idea": "test"}}
+{"task": "plan", "payload": {"i": 0}}
+{"task": "plan", "payload": {"i": 1}}
+{"task": "plan", "payload": {"idea": "test"}}
+{"task": "plan", "payload": {"i": 0}}
+{"task": "plan", "payload": {"i": 1}}
+{"task": "plan", "payload": {"idea": "test"}}
+{"task": "plan", "payload": {"idea": "demo", "module": "hello_mod"}, "ts": 1760533374.0291343}

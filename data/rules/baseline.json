@@ -1,0 +1,16 @@
+{
+    "name": "baseline",
+    "deny": [
+        {
+            "task": "deploy"
+        }
+    ],
+    "allow": [
+        {
+            "task": "plan"
+        },
+        {
+            "task": "codegen"
+        }
+    ]
+}
