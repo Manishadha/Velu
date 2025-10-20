@@ -23,6 +23,7 @@ for p in ("/app", "/app/src"):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+
 # ------------------------------------------------------------------------------
 # Helper: adapt any handler to the worker's expected (name, payload) -> dict shape
 # ------------------------------------------------------------------------------
@@ -36,21 +37,25 @@ def _adapt_handler(fn: Callable[..., Any]) -> Callable[[str, dict[str, Any]], di
     try:
         params = list(inspect.signature(fn).parameters.values())
         if len(params) == 1:  # payload-only
+
             def _wrapped(name: str, payload: dict[str, Any]) -> dict[str, Any]:
                 out = fn(payload)
                 return out if isinstance(out, dict) else {"ok": True, "data": out}
+
             return _wrapped
     except Exception:
         # If introspection fails, assume payload-only
         def _wrapped(name: str, payload: dict[str, Any]) -> dict[str, Any]:
             out = fn(payload)
             return out if isinstance(out, dict) else {"ok": True, "data": out}
+
         return _wrapped
 
     # Already (name, payload) form (or something compatible)
     def _wrapped(name: str, payload: dict[str, Any]) -> dict[str, Any]:
         out = fn(name, payload)
         return out if isinstance(out, dict) else {"ok": True, "data": out}
+
     return _wrapped
 
 
@@ -78,7 +83,9 @@ def _install_local_handlers() -> None:
             # Preferred: local_tasks.register(register_fn)
             try:
                 lt.register(_register)
-                log.info("local_tasks.register() succeeded; handlers now: %s", sorted(handlers.keys()))
+                log.info(
+                    "local_tasks.register() succeeded; handlers now: %s", sorted(handlers.keys())
+                )
             except TypeError as te:
                 # In case local register() signature is different; log and fall back
                 log.info("local_tasks.register() failed: %r", te)
