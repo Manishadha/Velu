@@ -12,6 +12,7 @@ jobs:
     strategy:
       matrix:
         python-version: [ "3.12" ]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,18 +32,18 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f tests/requirements.txt ]; then pip install -r tests/requirements.txt; fi
           # ensure core frameworks present
-          pip install fastapi uvicorn pytest ruff black
+          pip install fastapi uvicorn pytest ruff black requests
 
       - name: Lint (non-blocking, 2025 syntax)
         run: |
-          # Ruff CLI changed: use "check" instead of bare dot
           ruff check .
-          # Black check only warns (doesn't break CI)
           black --check . || true
 
-
-      - name: Run tests
+      - name: Run tests (with live server)
         env:
           API_KEYS: ""
           PYTHONPATH: src
-        run: pytest -q
+        run: |
+          nohup uvicorn services.app_server.main:create_app --factory --host 127.0.0.1 --port 8010 &
+          sleep 3
+          pytest -q
