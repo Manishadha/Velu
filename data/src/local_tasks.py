@@ -25,7 +25,7 @@ def _wrap_if_needed(
 
     if len(params) == 1:
         return lambda name, payload: fn(payload)
-    return fn  # already (name, payload)
+    return fn  
 
 
 def register(

@@ -7,7 +7,11 @@ import subprocess
 import time
 from typing import Any
 
-import sitecustomize  # noqa: F401  # side effects: handlers + queue patch
+# Optional: local hooks (handlers + queue patch). Safe if missing.
+try:
+    import sitecustomize  # type: ignore  # noqa: F401
+except ImportError:
+    sitecustomize = None  # not available in some CI paths
 
 from orchestrator.router_client import route
 from services.queue import sqlite_queue as q
