@@ -1,4 +1,3 @@
-# services/worker/main.py
 from __future__ import annotations
 
 import json
@@ -7,20 +6,17 @@ import subprocess
 import time
 from typing import Any
 
-# Optional: local hooks (handlers + queue patch). Safe if missing.
+# Optional local hooks; safe if missing.
 try:
     import sitecustomize  # type: ignore  # noqa: F401
 except ImportError:
-    sitecustomize = None  # not available in some CI paths
+    sitecustomize = None
 
 from orchestrator.router_client import route
 from services.queue import sqlite_queue as q
 
-# ---------- router calling & normalization ----------
-
 
 def _call_router(name: str, payload: dict) -> Any:
-    """Prefer route({'task':..., 'payload':...}); fallback to route(name, payload)."""
     try:
         return route({"task": name, "payload": payload})
     except TypeError as te:
@@ -31,10 +27,8 @@ def _call_router(name: str, payload: dict) -> Any:
 
 
 def _normalize_result(raw: Any) -> dict:
-    """Normalize router output to a dict with 'ok'."""
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", errors="replace")
-
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
@@ -43,14 +37,9 @@ def _normalize_result(raw: Any) -> dict:
             return {"ok": True, "data": parsed}
         except Exception:
             return {"ok": True, "data": raw}
-
     if isinstance(raw, dict):
         return raw
-
     return {"ok": True, "data": raw}
-
-
-# ---------- helpers ----------
 
 
 def _as_dict_payload(val: Any) -> dict[str, Any]:
@@ -74,9 +63,6 @@ def _require_job_done(job_id: int) -> dict[str, Any]:
     return rec.get("result") or {}
 
 
-# ---------- tasks ----------
-
-
 def _task_fail_n(rec: dict) -> dict:
     payload = _as_dict_payload(rec.get("payload"))
     want = int(payload.get("fail_times", 1))
@@ -87,12 +73,9 @@ def _task_fail_n(rec: dict) -> dict:
 
 
 def _task_plan_pipeline(rec: dict) -> dict:
-    """Plan → generate_code → run_tests, when WORKER_ENABLE_PIPELINE=1."""
     payload = _as_dict_payload(rec.get("payload"))
     idea = payload.get("idea", "demo")
     module = payload.get("module", "hello_mod")
-
-    # optional preview
     try:
         plan_preview = _normalize_result(_call_router("plan", {"idea": idea, "module": module}))
     except Exception:
@@ -100,18 +83,28 @@ def _task_plan_pipeline(rec: dict) -> dict:
 
     code_job_id = _enqueue(
         "generate_code",
-        {"idea": idea, "module": module, "parent_job": rec.get("id")},
+        {
+            "idea": idea,
+            "module": module,
+            "parent_job": rec.get("id"),
+        },
     )
 
     test_job_id = _enqueue(
         "run_tests",
-        {"code_job_id": code_job_id, "parent_job": rec.get("id")},
+        {
+            "code_job_id": code_job_id,
+            "parent_job": rec.get("id"),
+        },
     )
 
     return {
         "ok": True,
         "message": "pipeline created",
-        "subjobs": {"generate_code": code_job_id, "run_tests": test_job_id},
+        "subjobs": {
+            "generate_code": code_job_id,
+            "run_tests": test_job_id,
+        },
         "plan": plan_preview.get("plan", f"{idea} via {module}"),
     }
 
@@ -174,20 +167,20 @@ def _task_run_tests(rec: dict) -> dict:
             "message": "tests passed",
             "stdout": out.stdout,
             "stderr": out.stderr,
-            "using": {"code_job_id": code_job_id, "code_result": code_result},
+            "using": {
+                "code_job_id": code_job_id,
+                "code_result": code_result,
+            },
         }
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
 
 
-# ---------- dispatcher ----------
-
-
 def process_job(rec: dict) -> dict:
     """
     Load -> dispatch -> normalize.
-    'plan' passes through to router by default; pipeline when enabled.
-    Ensures 'plan' string exists for smoke test.
+    'plan' passes through by default; pipeline when enabled.
+    Only add 'plan' when 'module' is present (keeps unit tests strict).
     """
     name = rec["task"]
 
@@ -195,11 +188,19 @@ def process_job(rec: dict) -> dict:
         return _task_fail_n(rec)
 
     if name == "plan":
-        if os.getenv("WORKER_ENABLE_PIPELINE", "0").lower() not in {"", "0", "false", "no"}:
+        if os.getenv("WORKER_ENABLE_PIPELINE", "0").lower() not in {
+            "",
+            "0",
+            "false",
+            "no",
+        }:
             return _task_plan_pipeline(rec)
         payload = _as_dict_payload(rec.get("payload"))
         res = _normalize_result(_call_router(name, payload))
-        res.setdefault("plan", f"{payload.get('idea','')} via {payload.get('module','')}")
+        module = str(payload.get("module", "")).strip()
+        if module:
+            idea = str(payload.get("idea", "")).strip()
+            res.setdefault("plan", f"{idea} via {module}")
         return res
 
     if name == "generate_code":
@@ -210,9 +211,6 @@ def process_job(rec: dict) -> dict:
 
     payload = _as_dict_payload(rec.get("payload"))
     return _normalize_result(_call_router(name, payload))
-
-
-# ---------- main loop ----------
 
 
 def main() -> None:
