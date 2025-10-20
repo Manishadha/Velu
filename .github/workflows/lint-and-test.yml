@@ -41,8 +41,24 @@ jobs:
           ruff check .
           black --check . || true
 
-      - name: Run tests (with live server; skip 2 infra-heavy tests)
+      - name: Run tests (server + worker)
         run: |
-          nohup uvicorn services.app_server.main:create_app --factory --host 127.0.0.1 --port 8010 &
+          set -e
+          mkdir -p .run
+          export TASK_DB="$PWD/.run/jobs.db"
+          export API_KEYS="dev"
+          export PYTHONPATH="src:data/src"
+
+          # start API server
+          nohup env TASK_DB="$TASK_DB" API_KEYS="$API_KEYS" PYTHONPATH="src" \
+            uvicorn services.app_server.main:create_app --factory --host 127.0.0.1 --port 8010 &
+
+          # start worker (pipeline enabled)
+          nohup env TASK_DB="$TASK_DB" WORKER_ENABLE_PIPELINE=1 WORKER_MAX_JOBS=0 PYTHONPATH="$PYTHONPATH" \
+            python -m services.worker.main &
+
+          # small settle
           sleep 3
-          pytest -q -k "not test_feature_commit_smoke and not test_job_roundtrip"
+
+          # run tests
+          pytest -q
