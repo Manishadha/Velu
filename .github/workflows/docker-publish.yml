@@ -3,53 +3,30 @@ name: docker-publish
 on:
   push:
     branches: [ "main" ]
-    tags:     [ "v*" ]
-  pull_request:
-    branches: [ "main" ]
+    tags: [ "v*" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write   # needed to push to GHCR (safe on PRs; we don't push there)
-
+      packages: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Compute tags/labels automatically
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/velu-app
-          tags: |
-            # Tag 'main' on branch main
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            # Tag the semver tag itself, e.g. v0.1.8
-            type=ref,event=tag
-            # Also publish 'latest' for version tags
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
-      - name: Login to GHCR (push events only)
-        if: github.event_name == 'push'
+      - uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & (conditionally) push
+      - name: Build & (only on push) push
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' }}   # true on main/tags, false on PRs
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/velu-app:main
+            ghcr.io/${{ github.repository_owner }}/velu-app:${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
