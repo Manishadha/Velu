@@ -135,7 +135,7 @@ services:
       prometheus:
         condition: service_started
     restart: unless-stopped
-    read_only: false  # grafana writes its db
+    read_only: false
 
 secrets:
   prom_basic_pass.txt:

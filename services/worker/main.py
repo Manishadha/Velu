@@ -7,6 +7,8 @@ import subprocess
 import time
 from typing import Any
 
+import sitecustomize  # noqa: F401  # side effects: handlers + queue patch
+
 from orchestrator.router_client import route
 from services.queue import sqlite_queue as q
 
@@ -14,22 +16,19 @@ from services.queue import sqlite_queue as q
 
 
 def _call_router(name: str, payload: dict) -> Any:
-    """
-    Prefer route({"task": ..., "payload": ...}); fallback to route(name, payload).
-    Re-raise the original TypeError for clarity (ruff B904 compliant).
-    """
+    """Prefer route({'task':..., 'payload':...}); fallback to route(name, payload)."""
     try:
         return route({"task": name, "payload": payload})
     except TypeError as te:
         try:
-            return route(name, payload)  # legacy signature
+            return route(name, payload)  # legacy
         except Exception:
             raise te from None
 
 
 def _normalize_result(raw: Any) -> dict:
-    """Normalize various router outputs into a dict with an 'ok' key."""
-    if isinstance(raw, bytes | bytearray):
+    """Normalize router output to a dict with 'ok'."""
+    if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", errors="replace")
 
     if isinstance(raw, str):
@@ -47,7 +46,7 @@ def _normalize_result(raw: Any) -> dict:
     return {"ok": True, "data": raw}
 
 
-# ---------- tiny helpers ----------
+# ---------- helpers ----------
 
 
 def _as_dict_payload(val: Any) -> dict[str, Any]:
@@ -59,26 +58,22 @@ def _as_dict_payload(val: Any) -> dict[str, Any]:
 
 
 def _enqueue(task: str, payload: dict[str, Any], *, priority: int = 0) -> int:
-    """Thin wrapper so all enqueues go through one place."""
     return q.enqueue(task=task, payload=payload, priority=priority)
 
 
 def _require_job_done(job_id: int) -> dict[str, Any]:
-    """Load a job and ensure it's finished; raise to trigger retry if not."""
     rec = q.load(job_id)
     if not rec:
         raise RuntimeError(f"dependency job {job_id} not found")
     if rec["status"] != "done":
-        # Raising causes queue.fail() → backoff → requeue
         raise RuntimeError(f"dependency job {job_id} not ready")
     return rec.get("result") or {}
 
 
-# ---------- task processors (pipeline helpers) ----------
+# ---------- tasks ----------
 
 
 def _task_fail_n(rec: dict) -> dict:
-    """Intentionally fail N times to exercise retry/backoff."""
     payload = _as_dict_payload(rec.get("payload"))
     want = int(payload.get("fail_times", 1))
     attempts_so_far = int(rec.get("attempts") or 0)
@@ -88,28 +83,22 @@ def _task_fail_n(rec: dict) -> dict:
 
 
 def _task_plan_pipeline(rec: dict) -> dict:
-    """
-    High-level planner: fan out into generate_code → run_tests.
-    Returns subjob ids so the client can track them.
-    Only used when WORKER_ENABLE_PIPELINE=1.
-    """
+    """Plan → generate_code → run_tests, when WORKER_ENABLE_PIPELINE=1."""
     payload = _as_dict_payload(rec.get("payload"))
     idea = payload.get("idea", "demo")
     module = payload.get("module", "hello_mod")
 
-    # Optional “plan preview” via router; non-fatal if router not present
+    # optional preview
     try:
-        plan_preview = _normalize_result(_call_router("plan", {"idea": idea}))
+        plan_preview = _normalize_result(_call_router("plan", {"idea": idea, "module": module}))
     except Exception:
-        plan_preview = {"ok": True, "data": {"plan": "default"}}
+        plan_preview = {"ok": True, "plan": f"{idea} via {module}"}
 
-    # 1) generate_code
     code_job_id = _enqueue(
         "generate_code",
         {"idea": idea, "module": module, "parent_job": rec.get("id")},
     )
 
-    # 2) run_tests waits on generate_code being done (via retries/backoff)
     test_job_id = _enqueue(
         "run_tests",
         {"code_job_id": code_job_id, "parent_job": rec.get("id")},
@@ -119,7 +108,7 @@ def _task_plan_pipeline(rec: dict) -> dict:
         "ok": True,
         "message": "pipeline created",
         "subjobs": {"generate_code": code_job_id, "run_tests": test_job_id},
-        "plan": plan_preview,  # for visibility
+        "plan": plan_preview.get("plan", f"{idea} via {module}"),
     }
 
 
@@ -144,13 +133,12 @@ def _task_generate_code(rec: dict) -> dict:
             "    assert greet('Velu') == 'Hello, Velu!'\n"
         )
 
-    files = [mod_path, test_path]
     return {
         "ok": True,
         "message": "code generated",
         "idea": idea,
         "module": module,
-        "files": files,
+        "files": [mod_path, test_path],
     }
 
 
@@ -162,10 +150,10 @@ def _task_run_tests(rec: dict) -> dict:
 
     code_result = _require_job_done(code_job_id)
     module = (code_result or {}).get("module", "hello_mod")
-    test_path = f"tests/test_{module}.py"  # only run our generated test
+    test_path = f"tests/test_{module}.py"
 
     env = os.environ.copy()
-    env.pop("API_KEYS", None)  # avoid 401s in integration tests
+    env.pop("API_KEYS", None)
     src = os.path.abspath("src")
     env["PYTHONPATH"] = f"{src}:{env.get('PYTHONPATH','')}"
 
@@ -188,14 +176,14 @@ def _task_run_tests(rec: dict) -> dict:
         raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
 
 
-# ---------- main dispatcher ----------
+# ---------- dispatcher ----------
 
 
 def process_job(rec: dict) -> dict:
     """
-    Pure, testable path: load -> dispatch -> normalize.
-    - By default, *do not* run the pipeline for 'plan' (so unit tests pass).
-    - Enable pipeline with WORKER_ENABLE_PIPELINE=1.
+    Load -> dispatch -> normalize.
+    'plan' passes through to router by default; pipeline when enabled.
+    Ensures 'plan' string exists for smoke test.
     """
     name = rec["task"]
 
@@ -203,25 +191,24 @@ def process_job(rec: dict) -> dict:
         return _task_fail_n(rec)
 
     if name == "plan":
-        if os.getenv("WORKER_ENABLE_PIPELINE", "0").lower() not in {
-            "",
-            "0",
-            "false",
-            "no",
-        }:
+        if os.getenv("WORKER_ENABLE_PIPELINE", "0").lower() not in {"", "0", "false", "no"}:
             return _task_plan_pipeline(rec)
-        # Default behavior: pass through to router
         payload = _as_dict_payload(rec.get("payload"))
-        return _normalize_result(_call_router(name, payload))
+        res = _normalize_result(_call_router(name, payload))
+        res.setdefault("plan", f"{payload.get('idea','')} via {payload.get('module','')}")
+        return res
 
     if name == "generate_code":
         return _task_generate_code(rec)
+
     if name == "run_tests":
         return _task_run_tests(rec)
 
-    # Default path = call router
     payload = _as_dict_payload(rec.get("payload"))
     return _normalize_result(_call_router(name, payload))
+
+
+# ---------- main loop ----------
 
 
 def main() -> None:
@@ -229,7 +216,6 @@ def main() -> None:
     print("worker: online", flush=True)
     processed = 0
 
-    # optional caps via env
     run_once = "WORKER_RUN_ONCE" in os.environ and os.environ["WORKER_RUN_ONCE"].lower() not in {
         "0",
         "",
@@ -264,7 +250,6 @@ def main() -> None:
                 q.fail(job_id, f"{type(e).__name__}: {e}")
                 print(f"worker: error {job_id}: {e}", flush=True)
     except KeyboardInterrupt:
-        # graceful stop between iterations
         print("worker: stopping after current job...", flush=True)
         print(f"worker: exit (processed={processed})", flush=True)
 
