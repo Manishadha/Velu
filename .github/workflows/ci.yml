@@ -1,76 +1,33 @@
-name: CI
-
-# Grant GITHUB_TOKEN permission to push to GHCR
-permissions:
-  contents: read
-  packages: write
+name: ci
 
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ "main" ]
+  push:
+    branches: [ "feat/**" ]
 
 jobs:
-  lint:
+  lint-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install black ruff
-      - run: black --check .
-      - run: ruff check .
-      - name: Validate docker-compose renders
-        run: docker compose -f docker-compose.yml config
 
-  docker:
-    runs-on: ubuntu-latest
-    env:
-      IMAGE_NAME: velu-app
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-
-      # Login to GHCR with repo owner + GITHUB_TOKEN (now has packages:write)
-      - uses: docker/login-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          python-version: "3.12"
 
-      # Build on PRs only (no push)
-      - name: Build (no push)
-        if: github.event_name == 'pull_request'
+      - name: Install dev deps
         run: |
-          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
-          docker buildx build \
-            --platform linux/amd64 \
-            --provenance=false \
-            --tag "ghcr.io/${owner_lc}/${IMAGE_NAME}:sha-${GITHUB_SHA}" \
-            --load .
+          python -m pip install -U pip
+          pip install black ruff pytest requests
 
-      # Build & push on main
-      - name: Build & Push (main → :latest and :sha)
-        if: github.ref == 'refs/heads/main'
-        run: |
-          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
-          docker buildx build \
-            --platform linux/amd64 \
-            --provenance=false \
-            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:latest" \
-            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:sha-${GITHUB_SHA}" \
-            --push .
+      - name: Lint (black --check)
+        run: black --check .
 
-      # Build & push on tags vX.Y.Z
-      - name: Build & Push (tag → :vX.Y.Z)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
-          tag="${GITHUB_REF#refs/tags/}"
-          docker buildx build \
-            --platform linux/amd64 \
-            --provenance=false \
-            -t "ghcr.io/${owner_lc}/${IMAGE_NAME}:${tag}" \
-            --push .
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # light unit tests (no docker-in-docker)
+      - name: Run unit tests
+        run: pytest -q

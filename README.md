@@ -49,3 +49,5 @@ for jid in "$jid_plan" "$jid_analyze" "$jid_execute" "$jid_report"; do
 done
 
 curl -s 'http://localhost:9090/api/v1/targets' | jq '.data.activeTargets[]? | {scrapeUrl,health,lastError}'
+
+Auto-merge smoke test
