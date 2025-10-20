@@ -41,20 +41,18 @@ jobs:
           ruff check .
           black --check . || true
 
-      - name: Run tests (server + worker; auth only for external server)
+      - name: Run tests (server + worker; no auth in CI)
         run: |
           set -e
           mkdir -p .run
           export TASK_DB="$PWD/.run/jobs.db"
           export PYTHONPATH="src:data/src"
 
-          nohup env TASK_DB="$TASK_DB" API_KEYS="dev" PYTHONPATH="src" \
+          nohup env TASK_DB="$TASK_DB" PYTHONPATH="src" \
             uvicorn services.app_server.main:create_app --factory --host 127.0.0.1 --port 8010 &
 
           nohup env TASK_DB="$TASK_DB" WORKER_ENABLE_PIPELINE=1 WORKER_MAX_JOBS=0 PYTHONPATH="$PYTHONPATH" \
             python -m services.worker.main &
 
           sleep 3
-
-          export API_KEYS=""
           pytest -q
