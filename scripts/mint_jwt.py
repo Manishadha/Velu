@@ -8,9 +8,9 @@ import time
 from jose import jwt
 
 secret = os.environ.get("JWT_SECRET", "dev-secret-change-me")
-aud    = os.environ.get("JWT_AUDIENCE", "velu-api")
-iss    = os.environ.get("JWT_ISSUER", "velu")
-alg    = os.environ.get("JWT_ALG", "HS256")
+aud = os.environ.get("JWT_AUDIENCE", "velu-api")
+iss = os.environ.get("JWT_ISSUER", "velu")
+alg = os.environ.get("JWT_ALG", "HS256")
 
 now = int(time.time())
 claims = {

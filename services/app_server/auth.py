@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse
 #   - "permissive"       : bypass auth (used by CI/tests/dev)
 AUTH_MODE = os.getenv("AUTH_MODE", "strict").strip().lower()
 
+
 # API keys: "k1:dev,k2:ops,k3"
 def _keys() -> dict[str, str]:
     raw = os.environ.get("API_KEYS", "").strip()
@@ -27,7 +28,7 @@ def _keys() -> dict[str, str]:
             continue
         if ":" in part:
             k, label = part.split(":", 1)
-            out[k.strip()] = (label.strip() or "default")
+            out[k.strip()] = label.strip() or "default"
         else:
             out[part] = "default"
     return out
@@ -101,7 +102,6 @@ def _has_valid_jwt(request: Request) -> bool:
     now = int(time.time())
     exp = claims.get("exp")
     return not (exp is not None and int(exp) < now)
-
 
 
 # ------------------------------------------------------------------------------

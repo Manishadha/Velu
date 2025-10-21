@@ -97,9 +97,7 @@ def _task_plan_pipeline(rec: dict) -> dict:
     module = payload.get("module", "hello_mod")
 
     try:
-        plan_preview = _normalize_result(
-            _call_router("plan", {"idea": idea, "module": module})
-        )
+        plan_preview = _normalize_result(_call_router("plan", {"idea": idea, "module": module}))
     except Exception:
         plan_preview = {"ok": True, "plan": f"{idea} via {module}"}
 
@@ -184,9 +182,7 @@ def _task_run_tests(rec: dict) -> dict:
             "using": {"code_job_id": code_job_id, "code_result": code_result},
         }
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}"
-        ) from e
+        raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
 
 
 # --- dispatcher ---------------------------------------------------------------
@@ -234,10 +230,12 @@ def main() -> None:
     print("worker: online", flush=True)
     processed = 0
 
-    run_once = (
-        "WORKER_RUN_ONCE" in os.environ
-        and os.environ["WORKER_RUN_ONCE"].lower() not in {"0", "", "false", "no"}
-    )
+    run_once = "WORKER_RUN_ONCE" in os.environ and os.environ["WORKER_RUN_ONCE"].lower() not in {
+        "0",
+        "",
+        "false",
+        "no",
+    }
 
     max_jobs_env = os.getenv("WORKER_MAX_JOBS", "").strip()
     try:
