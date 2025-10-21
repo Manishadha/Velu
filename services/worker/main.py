@@ -1,5 +1,7 @@
+# services/worker/main.py
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -13,9 +15,14 @@ except ImportError:
     sitecustomize = None
 
 from orchestrator.router_client import route
-from services.queue import sqlite_queue as q
 
 
+# --- queue accessor (resolve after env is set, works in tests) ----------------
+def _q():
+    return importlib.import_module("services.queue.sqlite_queue")
+
+
+# --- router calling & normalization ------------------------------------------
 def _call_router(name: str, payload: dict) -> Any:
     try:
         return route({"task": name, "payload": payload})
@@ -42,6 +49,7 @@ def _normalize_result(raw: Any) -> dict:
     return {"ok": True, "data": raw}
 
 
+# --- helpers ------------------------------------------------------------------
 def _as_dict_payload(val: Any) -> dict[str, Any]:
     if isinstance(val, dict):
         return val
@@ -51,11 +59,11 @@ def _as_dict_payload(val: Any) -> dict[str, Any]:
 
 
 def _enqueue(task: str, payload: dict[str, Any], *, priority: int = 0) -> int:
-    return q.enqueue(task=task, payload=payload, priority=priority)
+    return _q().enqueue(task=task, payload=payload, priority=priority)
 
 
 def _require_job_done(job_id: int) -> dict[str, Any]:
-    rec = q.load(job_id)
+    rec = _q().load(job_id)
     if not rec:
         raise RuntimeError(f"dependency job {job_id} not found")
     if rec["status"] != "done":
@@ -63,6 +71,7 @@ def _require_job_done(job_id: int) -> dict[str, Any]:
     return rec.get("result") or {}
 
 
+# --- tasks --------------------------------------------------------------------
 def _task_fail_n(rec: dict) -> dict:
     payload = _as_dict_payload(rec.get("payload"))
     want = int(payload.get("fail_times", 1))
@@ -83,28 +92,17 @@ def _task_plan_pipeline(rec: dict) -> dict:
 
     code_job_id = _enqueue(
         "generate_code",
-        {
-            "idea": idea,
-            "module": module,
-            "parent_job": rec.get("id"),
-        },
+        {"idea": idea, "module": module, "parent_job": rec.get("id")},
     )
-
     test_job_id = _enqueue(
         "run_tests",
-        {
-            "code_job_id": code_job_id,
-            "parent_job": rec.get("id"),
-        },
+        {"code_job_id": code_job_id, "parent_job": rec.get("id")},
     )
 
     return {
         "ok": True,
         "message": "pipeline created",
-        "subjobs": {
-            "generate_code": code_job_id,
-            "run_tests": test_job_id,
-        },
+        "subjobs": {"generate_code": code_job_id, "run_tests": test_job_id},
         "plan": plan_preview.get("plan", f"{idea} via {module}"),
     }
 
@@ -167,15 +165,13 @@ def _task_run_tests(rec: dict) -> dict:
             "message": "tests passed",
             "stdout": out.stdout,
             "stderr": out.stderr,
-            "using": {
-                "code_job_id": code_job_id,
-                "code_result": code_result,
-            },
+            "using": {"code_job_id": code_job_id, "code_result": code_result},
         }
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
 
 
+# --- dispatcher ---------------------------------------------------------------
 def process_job(rec: dict) -> dict:
     """
     Load -> dispatch -> normalize.
@@ -213,8 +209,9 @@ def process_job(rec: dict) -> dict:
     return _normalize_result(_call_router(name, payload))
 
 
+# --- main loop ----------------------------------------------------------------
 def main() -> None:
-    q.init()
+    _q().init()
     print("worker: online", flush=True)
     processed = 0
 
@@ -234,7 +231,7 @@ def main() -> None:
 
     try:
         while True:
-            job_id = q.dequeue()
+            job_id = _q().dequeue()
             if job_id is None:
                 if max_jobs is not None and processed >= max_jobs:
                     print(f"worker: exit (processed={processed})", flush=True)
@@ -242,14 +239,14 @@ def main() -> None:
                 time.sleep(0.5)
                 continue
 
-            rec = q.load(job_id)
+            rec = _q().load(job_id)
             try:
                 result = process_job(rec)
-                q.finish(job_id, result)
+                _q().finish(job_id, result)
                 processed += 1
                 print(f"worker: done {job_id}", flush=True)
             except Exception as e:
-                q.fail(job_id, f"{type(e).__name__}: {e}")
+                _q().fail(job_id, f"{type(e).__name__}: {e}")
                 print(f"worker: error {job_id}: {e}", flush=True)
     except KeyboardInterrupt:
         print("worker: stopping after current job...", flush=True)
