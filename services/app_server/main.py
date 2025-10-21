@@ -35,6 +35,10 @@ from services.queue import sqlite_queue as _qq
 from services.queue.sqlite_queue import enqueue as q_enqueue
 from services.queue.sqlite_queue import load as q_load
 
+app = FastAPI(...)
+app.add_middleware(ApiKeyRequiredMiddleware)
+
+
 # --- internal helpers for safety & typing ---
 ALLOWED_TABLES: Final[set[str]] = {"tasks", "jobs", "results"}
 ALLOWED_COLUMNS: Final[set[str]] = {"payload", "payload_json", "result_json"}

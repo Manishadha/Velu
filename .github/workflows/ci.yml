@@ -1,5 +1,10 @@
 name: ci
 
+env:
+  PYTHONPATH: src:data/src
+  API_KEYS: ""           # none
+  AUTH_MODE: permissive
+
 on:
   pull_request:
     branches: [ "**" ]

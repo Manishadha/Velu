@@ -1,43 +1,32 @@
 name: pr-auto-approve-and-automerge
 
-
-
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
-    branches: [ "main" ]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
+    branches: [main, dev]
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   approve-and-merge:
-    # Only for PRs authored by the bot account
-    if: github.event.pull_request.user.login == 'naduvil'
+    if: >
+      contains(github.event.pull_request.labels.*.name, 'automerge') &&
+      github.event.pull_request.user.login == 'naduvil'
     runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      # Post a real approval as Manishadha (via PAT secret)
-      - name: Auto-approve (owner account)
+      # DO NOT checkout PR code here (pull_request_target runs elevated).
+      - name: Auto-approve with maintainer token
         uses: hmarr/auto-approve-action@v4
-        with:
-          pull-request-number: ${{ github.event.pull_request.number }}
         env:
           GITHUB_TOKEN: ${{ secrets.PR_APPROVER_TOKEN }}
+        with:
+          pull-request-number: ${{ github.event.pull_request.number }}
 
-      # Optional: require a label to guard merges (remove this step if you want every bot PR to merge)
-      - name: Require "automerge" label
-        if: contains(github.event.pull_request.labels.*.name, 'automerge') == false
-        run: |
-          echo "Missing 'automerge' label; skip enabling auto-merge."
-          exit 0
-
-      # Turn on auto-merge so GitHub merges as soon as checks are green
-      - name: Enable auto-merge
+      - name: Enable auto-merge (squash)
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
           pull-request-number: ${{ github.event.pull_request.number }}
           merge-method: squash
-        env:
-          GITHUB_TOKEN: ${{ secrets.PR_APPROVER_TOKEN }}
+          token: ${{ secrets.PR_APPROVER_TOKEN }}
