@@ -139,7 +139,7 @@ def _next_delay(attempts: int) -> int:
     exp = max(0, attempts)  # 0,1,2,...
     base = max(1, SQLQ_RETRY_BASE_SEC)
     delay = base * (2**exp)
-    jitter = random.uniform(0, 0.25 * delay)
+    jitter = random.uniform(0, 0.25 * delay)  # nosec B311: non-crypto backoff jitter
     return int(delay + jitter)
 
 

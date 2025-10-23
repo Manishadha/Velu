@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import subprocess
+import subprocess  # nosec B404: used with shell=False and static args
 from pathlib import Path
 
 FORBIDDEN_PATTERNS = [
@@ -21,16 +21,14 @@ FORBIDDEN_PATTERNS = [
 
 
 def shell(cmd: str, cwd: Path | None = None, env: dict | None = None) -> tuple[int, str, str]:
-    proc = subprocess.Popen(  # noqa: S603
+    completed = subprocess.run(  # nosec B603
         shlex.split(cmd),
         cwd=str(cwd) if cwd else None,
         env={**os.environ, **(env or {})},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
-    out, err = proc.communicate()
-    return proc.returncode, out.strip(), err.strip()
+    return completed.returncode, completed.stdout, completed.stderr
 
 
 def looks_like_git_repo(path: Path) -> bool:

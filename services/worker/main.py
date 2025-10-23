@@ -4,7 +4,8 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import subprocess
+import subprocess  # nosec B404: controlled commands, shell=False
+import sys
 import time
 from typing import Any
 
@@ -12,24 +13,18 @@ from typing import Any
 try:
     import sitecustomize  # type: ignore  # noqa: F401
 except ImportError:
-    sitecustomize = None  # noqa: F401
+    sitecustomize = None
 
 from orchestrator.router_client import route
 
+
 # --- queue accessor (resolve after env is set, works in tests) ----------------
-_Q_MOD = None
-
-
 def _q():
-    global _Q_MOD
-    if _Q_MOD is None:
-        _Q_MOD = importlib.import_module("services.queue.sqlite_queue")
-    return _Q_MOD
+    return importlib.import_module("services.queue.sqlite_queue")
 
 
 # --- router calling & normalization ------------------------------------------
 def _call_router(name: str, payload: dict) -> Any:
-    """Try route({'task':..., 'payload':...}) first; fall back to legacy signature."""
     try:
         return route({"task": name, "payload": payload})
     except TypeError as te:
@@ -40,22 +35,18 @@ def _call_router(name: str, payload: dict) -> Any:
 
 
 def _normalize_result(raw: Any) -> dict:
-    """Coerce router outputs into {'ok': True, ...} (or passthrough dict)."""
     if isinstance(raw, (bytes, bytearray)):
         raw = raw.decode("utf-8", errors="replace")
-
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            return {"ok": True, "data": parsed}
         except Exception:
             return {"ok": True, "data": raw}
-        if isinstance(parsed, dict):
-            return parsed
-        return {"ok": True, "data": parsed}
-
     if isinstance(raw, dict):
         return raw
-
     return {"ok": True, "data": raw}
 
 
@@ -95,7 +86,6 @@ def _task_plan_pipeline(rec: dict) -> dict:
     payload = _as_dict_payload(rec.get("payload"))
     idea = payload.get("idea", "demo")
     module = payload.get("module", "hello_mod")
-
     try:
         plan_preview = _normalize_result(_call_router("plan", {"idea": idea, "module": module}))
     except Exception:
@@ -160,15 +150,12 @@ def _task_run_tests(rec: dict) -> dict:
 
     env = os.environ.copy()
     env.pop("API_KEYS", None)
-
     src = os.path.abspath("src")
-    current_ppath = env.get("PYTHONPATH", "")
-    sep = os.path.pathsep
-    env["PYTHONPATH"] = f"{src}{sep}{current_ppath}" if current_ppath else src
+    env["PYTHONPATH"] = f"{src}:{env.get('PYTHONPATH','')}"
 
     try:
-        out = subprocess.run(
-            ["pytest", "-q", test_path],
+        out = subprocess.run(  # nosec B603,B607: static args, no user input
+            [sys.executable, "-m", "pytest", "-q", test_path],
             check=True,
             capture_output=True,
             text=True,
@@ -205,7 +192,6 @@ def process_job(rec: dict) -> dict:
             "no",
         }:
             return _task_plan_pipeline(rec)
-
         payload = _as_dict_payload(rec.get("payload"))
         res = _normalize_result(_call_router(name, payload))
         module = str(payload.get("module", "")).strip()
@@ -236,7 +222,6 @@ def main() -> None:
         "false",
         "no",
     }
-
     max_jobs_env = os.getenv("WORKER_MAX_JOBS", "").strip()
     try:
         max_jobs = int(max_jobs_env) if max_jobs_env else None
