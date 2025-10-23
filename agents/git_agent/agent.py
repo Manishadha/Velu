@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - controlled CLI usage
 from pathlib import Path
 
 # --- lightweight git helpers -------------------------------------------------
@@ -15,7 +15,7 @@ def _run(
     """Run command and return (rc, stdout, stderr)."""
     try:
         cp = subprocess.run(
-            cmd,
+            cmd,  # nosec B603 - static arg list, no user input
             cwd=str(cwd) if cwd else None,
             env={**os.environ, **(env or {})} if env else None,
             capture_output=True,  # noqa: S603
