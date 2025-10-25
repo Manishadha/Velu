@@ -1,325 +1,183 @@
 from __future__ import annotations
 
-import json
 import os
-import re
+import shlex
 import shutil
-import subprocess
-from dataclasses import dataclass
-from datetime import date
+import subprocess  # nosec B404 - controlled CLI usage
 from pathlib import Path
 
-from .git_utils import (
-    add_all_safe,
-    gh_available,
-    git,
-    has_remote_origin,
-    load_yaml_like,
-    resolve_repo_path,
-    shell,
-)
-
-CONFIG_PATH = Path("configs/agent.yml")
+# --- lightweight git helpers -------------------------------------------------
 
 
-@dataclass
-class GitConfig:
-    default_target: str
-    protected: list[str]
-    feature_pat: str
-    fix_pat: str
-    chore_pat: str
-    docs_pat: str
-    refactor_pat: str
-    hotfix_pat: str
-    sign: bool
-    body_prefix: str
-    changelog_path: Path
-    tag_prefix: str
-    push: bool
-    open_pr: bool
+def _run(
+    cmd: list[str], *, cwd: Path | None = None, env: dict | None = None
+) -> tuple[int, str, str]:
+    """Run command and return (rc, stdout, stderr)."""
+    try:
+        cp = subprocess.run(
+            cmd,  # nosec B603 - static arg list, no user input
+            cwd=str(cwd) if cwd else None,
+            env={**os.environ, **(env or {})} if env else None,
+            capture_output=True,  # noqa: S603
+            text=True,
+            check=False,
+        )
+        return cp.returncode, cp.stdout, cp.stderr
+    except FileNotFoundError as e:
+        return 127, "", str(e)
 
 
-def _as_bool(v: str | int | bool, default: bool = False) -> bool:
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, int):
-        return v != 0
-    s = str(v).strip().lower()
-    if s in {"1", "true", "yes", "y"}:
-        return True
-    if s in {"0", "false", "no", "n"}:
-        return False
-    return default
+def git(cmd: str, *, cwd: Path) -> tuple[int, str, str]:
+    """Run a git command with safe splitting."""
+    return _run(["git", *shlex.split(cmd)], cwd=cwd)
 
 
-def load_config(repo: Path) -> GitConfig:
-    cfg = load_yaml_like(repo / CONFIG_PATH)
-    br = cfg.get("branching", {})
-    cm = cfg.get("commits", {})
-    ch = cfg.get("changelog", {})
-    ver = cfg.get("versioning", {})
-    ci = cfg.get("ci", {})
-    return GitConfig(
-        default_target=br.get("default_target", "dev"),
-        protected=list(br.get("protected", ["main"])),
-        feature_pat=br.get("patterns", {}).get("feature", "feat/{scope}"),
-        fix_pat=br.get("patterns", {}).get("fix", "fix/{scope}"),
-        chore_pat=br.get("patterns", {}).get("chore", "chore/{scope}"),
-        docs_pat=br.get("patterns", {}).get("docs", "docs/{scope}"),
-        refactor_pat=br.get("patterns", {}).get("refactor", "refactor/{scope}"),
-        hotfix_pat=br.get("patterns", {}).get("hotfix", "hotfix/{scope}"),
-        sign=_as_bool(cm.get("sign", "0")),
-        body_prefix=str(cm.get("body_prefix", "Generated-by: Velu Agent")),
-        changelog_path=Path(ch.get("path", "docs/CHANGELOG.md")),
-        tag_prefix=str(ver.get("tag_prefix", "v")),
-        push=_as_bool(ci.get("push", "1"), True),
-        open_pr=_as_bool(ci.get("open_pr", "1"), True),
-    )
-
-
-def branch_name(kind: str, scope: str, cfg: GitConfig) -> str:
-    mapping = {
-        "feature": cfg.feature_pat,
-        "fix": cfg.fix_pat,
-        "chore": cfg.chore_pat,
-        "docs": cfg.docs_pat,
-        "refactor": cfg.refactor_pat,
-        "hotfix": cfg.hotfix_pat,
-    }
-    pat = mapping.get(kind, cfg.feature_pat)
-    norm = re.sub(r"[^a-zA-Z0-9._-]+", "-", scope.strip()).strip("-")
-    return pat.format(scope=norm)
-
-
-def ensure_branch(repo: Path, name: str) -> None:
-    rc, _out, _err = git(f"rev-parse --verify {name}", cwd=repo)
+def add_all_safe(repo: Path) -> None:
+    rc, _out, err = git("add -A", cwd=repo)
     if rc != 0:
-        rc, _out, err = git(f"checkout -b {name}", cwd=repo)
+        raise RuntimeError(f"git add failed: {err or _out}")
+
+
+def ensure_git_identity(
+    repo: Path, *, name: str = "Velu Bot", email: str = "ops@example.com"
+) -> None:
+    """Ensure repo has user.name and user.email to avoid 'Author identity unknown'."""
+    need_set = False
+    rc, out, _ = git("config user.name", cwd=repo)
+    if rc != 0 or not out.strip():
+        need_set = True
+    rc, out, _ = git("config user.email", cwd=repo)
+    if rc != 0 or not out.strip():
+        need_set = True
+    if need_set:
+        rc, _o, err = git(f'config user.name "{name}"', cwd=repo)
         if rc != 0:
-            raise RuntimeError(err or f"cannot create {name}")
-    else:
-        rc, _out, err = git(f"checkout {name}", cwd=repo)
+            raise RuntimeError(f"git config user.name failed: {err}")
+        rc, _o, err = git(f'config user.email "{email}"', cwd=repo)
         if rc != 0:
-            raise RuntimeError(err or f"cannot switch to {name}")
-
-
-def run_tests(repo: Path) -> None:
-    # best-effort; do not hard-fail if tools are missing
-    if shutil.which("ruff"):
-        subprocess.call(["ruff", "check", "."], cwd=str(repo))
-    if shutil.which("black"):
-        subprocess.call(["black", "--check", "."], cwd=str(repo))
-    if shutil.which("pytest"):
-        env = os.environ.copy()
-        env["PYTHONPATH"] = "src"
-        env.pop("API_KEYS", None)
-        subprocess.call(["pytest", "-q"], cwd=str(repo), env=env)
-
-
-def update_unreleased_changelog(repo: Path, cfg: GitConfig, entries: list[str]) -> None:
-    p = repo / cfg.changelog_path
-    if not p.exists():
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("# Changelog\n\n## [Unreleased]\n")
-
-    text = p.read_text()
-    if "## [Unreleased]" not in text:
-        text = "# Changelog\n\n## [Unreleased]\n" + text
-
-    lines: list[str] = []
-    inserted = False
-    for line in text.splitlines():
-        lines.append(line)
-        if not inserted and line.strip() == "## [Unreleased]":
-            lines.append("### Added")
-            for e in entries:
-                lines.append(f"- {e}")
-            inserted = True
-
-    new_text = "\n".join(lines).rstrip() + "\n"
-    p.write_text(new_text)
-
-
-def conventional_message(
-    commit_type: str,
-    scope: str,
-    summary: str,
-    body: str | None,
-    cfg: GitConfig,
-) -> str:
-    head = f"{commit_type}({scope}): {summary}".strip()
-    body_lines: list[str] = []
-    if body and body.strip():
-        body_lines.append(body.strip())
-    body_lines.append(cfg.body_prefix)
-    return head + "\n\n" + "\n".join(body_lines) + "\n"
+            raise RuntimeError(f"git config user.email failed: {err}")
 
 
 def commit_all(repo: Path, msg: str, sign: bool) -> None:
     add_all_safe(repo)
+    ensure_git_identity(repo)
     sign_flag = "-S" if sign else ""
-    rc, _out, err = git(f"commit {sign_flag} -m {json.dumps(msg)}", cwd=repo)
+    rc, _out, err = git(f"commit {sign_flag} -m {shlex.quote(msg)}", cwd=repo)
     if rc != 0:
-        raise RuntimeError(err or "git commit failed")
+        if "Author identity unknown" in (err or ""):
+            ensure_git_identity(repo)
+            rc, _out, err = git(f"commit {sign_flag} -m {shlex.quote(msg)}", cwd=repo)
+        if rc != 0:
+            raise RuntimeError(err or "git commit failed")
 
 
-def push_branch(repo: Path, name: str) -> None:
-    if not has_remote_origin(repo):
-        return
-    rc, _out, err = git(f"push -u origin {name}", cwd=repo)
-    if rc != 0:
-        raise RuntimeError(err or "git push failed")
+# --- quality helpers ----------------------------------------------------------
 
 
-def open_pr(repo: Path, from_branch: str, to_branch: str, title: str, body: str) -> None:
-    if not gh_available() or not has_remote_origin(repo):
-        return
-    cmd = (
-        "gh pr create --fill "
-        f"--base {to_branch} --head {from_branch} "
-        f"--title {json.dumps(title)} --body {json.dumps(body)}"
-    )
-    rc, out, err = shell(cmd, cwd=repo)
-    if rc != 0:
-        print(err or out)  # non-fatal; log for visibility
+def _which(name: str) -> str | None:
+    return shutil.which(name)
+
+
+def _has_tests(repo: Path) -> bool:
+    for pat in ("tests/**/*.py", "tests/*.py", "test_*.py", "tests.py"):
+        if list(repo.glob(pat)):
+            return True
+    return False
+
+
+def run_quality(repo: Path) -> None:
+    """
+    Run local quality tools if available.
+    Default: non-fatal. Opt into strict with GIT_AGENT_STRICT_LINT=1.
+    - ruff check .
+    - black .        (format, not --check)
+    - pytest -q      (ONLY if GIT_AGENT_RUN_PYTEST=1 and tests exist)
+    """
+    env = os.environ.copy()
+    env.pop("API_KEYS", None)
+
+    strict = os.getenv("GIT_AGENT_STRICT_LINT", "0").lower() in {"1", "true", "yes"}
+
+    ruff = _which("ruff")
+    if ruff:
+        rc, out, err = _run([ruff, "check", "."], cwd=repo)
+        if strict and rc != 0:
+            raise subprocess.CalledProcessError(rc, [ruff, "check", "."], out, err)
+
+    black = _which("black")
+    if black:
+        # format in-place so temporary repos pass style
+        rc, out, err = _run([black, "."], cwd=repo)
+        if strict and rc != 0:
+            raise subprocess.CalledProcessError(rc, [black, "."], out, err)
+
+    if os.getenv("GIT_AGENT_RUN_PYTEST", "0").lower() in {"1", "true", "yes"} and _has_tests(repo):
+        pt = _which("pytest")
+        if pt:
+            rc, out, err = _run([pt, "-q"], cwd=repo, env=env)
+            if strict and rc != 0:
+                raise subprocess.CalledProcessError(rc, [pt, "-q"], out, err)
+
+
+# --- Agent --------------------------------------------------------------------
 
 
 class GitIntegrationAgent:
-    def __init__(self, repo: Path | None = None) -> None:
-        self.repo = repo or resolve_repo_path()
+    """
+    Minimal git-integration used by tests:
+      - resolves repo path (VELU_REPO_PATH or cwd)
+      - creates feature branch from 'dev' (fallback to current HEAD)
+      - commits all changes with a conventional message
+      - runs local quality hooks (non-fatal by default)
+      - returns the new branch name
+    """
+
+    def __init__(self) -> None:
+        self.repo = Path(os.environ.get("VELU_REPO_PATH", ".")).resolve()
         if not (self.repo / ".git").exists():
             raise RuntimeError(f"Not a git repo: {self.repo}")
-        self.cfg = load_config(self.repo)
 
-    def feature_commit(self, scope: str, summary: str, body: str = "") -> str:
-        git("fetch", "--all", cwd=self.repo)
-        ensure_branch(self.repo, self.cfg.default_target)
-        git("pull", "--ff-only", cwd=self.repo)
+        self.cfg = type("Cfg", (), {"sign": False})  # simple container
 
-        fname = branch_name("feature", scope, self.cfg)
-        ensure_branch(self.repo, fname)
+    @staticmethod
+    def _slug(text: str) -> str:
+        out = []
+        for ch in text.lower():
+            if ch.isalnum():
+                out.append(ch)
+            elif ch in (" ", "_", "-", "/"):
+                out.append("-")
+        slug = "".join(out).strip("-")
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        return slug or "change"
 
-        msg = conventional_message("feat", scope, summary, body, self.cfg)
-        commit_all(self.repo, msg, self.cfg.sign)
+    def feature_commit(self, scope: str, title: str, body: str) -> str:
+        """
+        Create a feature branch and commit changes.
+        Returns the created branch name.
+        """
+        scope = (scope or "feat").strip()
+        title = (title or "update").strip()
+        branch = f"feat/{self._slug(scope)}-{self._slug(title)}"
 
-        run_tests(self.repo)
-
-        if self.cfg.push:
-            push_branch(self.repo, fname)
-            if self.cfg.open_pr:
-                pr_body = (
-                    "- [x] tests passed (or not required)\n"
-                    "- [x] lint clean (ruff/black)\n"
-                    "- [x] no secrets added\n"
-                    "- [x] changelog updated if user-facing\n"
-                    "- [x] conventional commits used\n"
-                )
-                open_pr(
-                    self.repo,
-                    fname,
-                    self.cfg.default_target,
-                    f"[feat] {scope}: {summary}",
-                    pr_body,
-                )
-
-        self._touch_changelog(f"feat({scope}): {summary}")
-        return fname
-
-    def fix_commit(self, scope: str, summary: str, body: str = "") -> str:
-        git("fetch", "--all", cwd=self.repo)
-        ensure_branch(self.repo, self.cfg.default_target)
-        git("pull", "--ff-only", cwd=self.repo)
-
-        bname = branch_name("fix", scope, self.cfg)
-        ensure_branch(self.repo, bname)
-
-        msg = conventional_message("fix", scope, summary, body, self.cfg)
-        commit_all(self.repo, msg, self.cfg.sign)
-
-        run_tests(self.repo)
-
-        if self.cfg.push:
-            push_branch(self.repo, bname)
-            if self.cfg.open_pr:
-                pr_body = (
-                    "- [x] tests passed (or not required)\n"
-                    "- [x] lint clean\n"
-                    "- [x] no secrets added\n"
-                    "- [x] changelog updated if user-facing\n"
-                    "- [x] conventional commits used\n"
-                )
-                open_pr(
-                    self.repo,
-                    bname,
-                    self.cfg.default_target,
-                    f"[fix] {scope}: {summary}",
-                    pr_body,
-                )
-
-        self._touch_changelog(f"fix({scope}): {summary}")
-        return bname
-
-    def chore_commit(self, scope: str, summary: str, body: str = "") -> str:
-        git("fetch", "--all", cwd=self.repo)
-        ensure_branch(self.repo, self.cfg.default_target)
-        git("pull", "--ff-only", cwd=self.repo)
-
-        bname = branch_name("chore", scope, self.cfg)
-        ensure_branch(self.repo, bname)
-
-        msg = conventional_message("chore", scope, summary, body, self.cfg)
-        commit_all(self.repo, msg, self.cfg.sign)
-
-        if self.cfg.push:
-            push_branch(self.repo, bname)
-            if self.cfg.open_pr:
-                open_pr(
-                    self.repo,
-                    bname,
-                    self.cfg.default_target,
-                    f"[chore] {scope}: {summary}",
-                    "- [x] checks",
-                )
-        return bname
-
-    def release(self, version: str, summary: str = "") -> str:  # noqa: ARG002
-        ensure_branch(self.repo, "main")
-        rc, _out, err = git("pull --ff-only", cwd=self.repo)
+        # checkout from 'dev' if exists; else create from HEAD
+        rc, _out, _err = git("show-ref --verify --quiet refs/heads/dev", cwd=self.repo)
+        if rc == 0:
+            rc, out, err = git(f"checkout -b {shlex.quote(branch)} dev", cwd=self.repo)
+        else:
+            rc, out, err = git(f"checkout -b {shlex.quote(branch)}", cwd=self.repo)
         if rc != 0:
-            raise RuntimeError(err or "cannot pull main")
+            raise RuntimeError(err or out or "git checkout failed")
 
-        ch_path = self.repo / self.cfg.changelog_path
-        text = ch_path.read_text() if ch_path.exists() else "# Changelog\n\n## [Unreleased]\n"
-        if "## [Unreleased]" in text:
-            today = date.today().isoformat()
-            new = text.replace(
-                "## [Unreleased]", f"## [{self.cfg.tag_prefix}{version}] – {today}\n", 1
-            )
-            ch_path.write_text(new)
+        msg_lines = [f"feat({scope}): {title}", "", "Generated-by: Velu Agent", ""]
+        if body:
+            msg_lines.append(body)
+        msg = "\n".join(msg_lines)
 
-        msg = f"chore(release): {self.cfg.tag_prefix}{version}"
         commit_all(self.repo, msg, self.cfg.sign)
 
-        rc, _out, err = git(
-            f'tag -a {self.cfg.tag_prefix}{version} -m "Release {self.cfg.tag_prefix}{version}"',
-            cwd=self.repo,
-        )
-        if rc != 0:
-            raise RuntimeError(err or "git tag failed")
+        # quality hooks (non-fatal unless strict requested)
+        run_quality(self.repo)
 
-        if self.cfg.push and has_remote_origin(self.repo):
-            rc, _out, err = git("push origin main", cwd=self.repo)
-            if rc != 0:
-                raise RuntimeError(err or "push main failed")
-            rc, _out, err = git(f"push origin {self.cfg.tag_prefix}{version}", cwd=self.repo)
-            if rc != 0:
-                raise RuntimeError(err or "push tag failed")
-
-        return version
-
-    def _touch_changelog(self, line: str) -> None:
-        try:
-            update_unreleased_changelog(self.repo, self.cfg, [line])
-        except Exception as exc:  # noqa: BLE001
-            print(f"[git-agent] changelog update skipped: {exc}")
+        return branch

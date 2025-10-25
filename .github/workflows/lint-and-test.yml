@@ -1,29 +1,27 @@
-name: ci
-
-env:
-  PYTHONPATH: src:data/src
-  API_KEYS: ""           # none
-  AUTH_MODE: permissive
+name: lint-and-test
 
 on:
   pull_request:
-    branches: [ "**" ]
+    branches: [ main, dev ]
   push:
-    branches: [ "**" ]
+    branches: [ main, dev ]
 
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.12" ]
     env:
       PYTHONPATH: src:data/src
       API_KEYS: ""
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Git identity (for agent commits in tests)
@@ -31,14 +29,14 @@ jobs:
           git config --global user.email "ci@velu.local"
           git config --global user.name  "Velu CI"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install -U pip
-          [ -f requirements.txt ] && pip install -r requirements.txt || true
-          [ -f tests/requirements.txt ] && pip install -r tests/requirements.txt || true
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f tests/requirements.txt ]; then pip install -r tests/requirements.txt; fi
           pip install fastapi uvicorn pytest ruff black requests
 
-      - name: Lint
+      - name: Lint (2025)
         run: |
           ruff check .
           black --check . || true
@@ -50,11 +48,9 @@ jobs:
           export TASK_DB="$PWD/.run/jobs.db"
           export PYTHONPATH="src:data/src"
 
-          # start API server WITHOUT auth
           nohup env TASK_DB="$TASK_DB" PYTHONPATH="src" \
             uvicorn services.app_server.main:create_app --factory --host 127.0.0.1 --port 8010 &
 
-          # start worker (pipeline on), also WITHOUT auth
           nohup env TASK_DB="$TASK_DB" WORKER_ENABLE_PIPELINE=1 WORKER_MAX_JOBS=0 PYTHONPATH="$PYTHONPATH" \
             python -m services.worker.main &
 

@@ -134,7 +134,7 @@ def recent_tasks(limit: int = 100) -> list[dict[str, Any]]:
     for line in _tail_lines(jsonl_path, limit):
         try:
             out.append(json.loads(line))
-        except Exception:
+        except json.JSONDecodeError:
             continue
     # newest-first for tests that expect latest insert at index 0
     out.reverse()

@@ -9,6 +9,11 @@ services:
     ports:
       - "127.0.0.1:8010:8010"
     environment:
+      AUTH_MODE: "strict"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_AUDIENCE: "velu-api"
+      JWT_ISSUER: "velu"
+      JWT_ALG: "HS256"
       API_KEYS: ${API_KEYS:-dev}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
       TASK_DB: /data/jobs.db
@@ -30,40 +35,48 @@ services:
       - data:/data
 
   worker:
-    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
-    pull_policy: always
-    command:
-      - python
-      - -c
-      - |
-        import sys, runpy
-        sys.path[:0] = ['/app', '/app/src']
-        import sitecustomize
-        runpy.run_module('services.queue.worker_entry', run_name='__main__')
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      TASK_DB: /data/jobs.db
-      WORKER_ENABLE_PIPELINE: ${WORKER_ENABLE_PIPELINE:-1}
-      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-0}
-      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
-    restart: unless-stopped
-    read_only: true
-    tmpfs: ["/tmp"]
-    volumes:
-      - data:/data
-      - ./data/src:/app/src
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "python -c \"import sqlite3,sys; con=sqlite3.connect('/data/jobs.db', timeout=2); cur=con.cursor(); cur.execute('BEGIN IMMEDIATE'); cur.execute('ROLLBACK'); sys.exit(0)\"",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+   image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
+   pull_policy: always
+   command:
+    - python
+    - -c
+    - |
+      import sys, importlib
+      sys.path[:0] = ['/app', '/app/src']
+      import sitecustomize  # defines _db_pop_one_fixed
+      we = importlib.import_module('services.queue.worker_entry')
+      # Hard-bind the patch onto the SAME module object we'll run:
+      if hasattr(sitecustomize, '_db_pop_one_fixed'):
+          we._db_pop_one = sitecustomize._db_pop_one_fixed
+          print("startup: forced _db_pop_one -> sitecustomize._db_pop_one_fixed", flush=True)
+      we.main()
+   depends_on:
+    api:
+      condition: service_healthy
+   environment:
+    TASK_DB: /data/jobs.db
+    WORKER_ENABLE_PIPELINE: ${WORKER_ENABLE_PIPELINE:-1}
+    WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-0}
+    WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
+   restart: unless-stopped
+   read_only: true
+   tmpfs: ["/tmp"]
+   volumes:
+    - data:/data
+    - ./data/src:/app/src
+   healthcheck:
+    test:
+      [
+        "CMD-SHELL",
+        "python -c \"import sqlite3,sys; con=sqlite3.connect('/data/jobs.db', timeout=2); cur=con.cursor(); cur.execute('BEGIN IMMEDIATE'); cur.execute('ROLLBACK'); sys.exit(0)\"",
+      ]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 15s
+
+
+
 
   sqlite_backup:
     image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
@@ -127,7 +140,7 @@ services:
       prometheus:
         condition: service_started
     restart: unless-stopped
-    read_only: false  # grafana writes its db
+    read_only: false
 
 secrets:
   prom_basic_pass.txt:

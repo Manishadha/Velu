@@ -1,0 +1,32 @@
+name: pr-auto-approve-and-automerge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
+    branches: [main, dev]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  approve-and-merge:
+    if: >
+      contains(github.event.pull_request.labels.*.name, 'automerge') &&
+      github.event.pull_request.user.login == 'naduvil'
+    runs-on: ubuntu-latest
+    steps:
+      # DO NOT checkout PR code here (pull_request_target runs elevated).
+      - name: Auto-approve with maintainer token
+        uses: hmarr/auto-approve-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.PR_APPROVER_TOKEN }}
+        with:
+          pull-request-number: ${{ github.event.pull_request.number }}
+
+      - name: Enable auto-merge (squash)
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: squash
+          token: ${{ secrets.PR_APPROVER_TOKEN }}
