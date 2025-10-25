@@ -9,6 +9,11 @@ services:
     ports:
       - "127.0.0.1:8010:8010"
     environment:
+      AUTH_MODE: "strict"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_AUDIENCE: "velu-api"
+      JWT_ISSUER: "velu"
+      JWT_ALG: "HS256"
       API_KEYS: ${API_KEYS:-dev}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
       TASK_DB: /data/jobs.db
