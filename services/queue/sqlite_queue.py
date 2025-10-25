@@ -9,8 +9,6 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
-# ---------- Config ----------
-
 
 def _int_env(name: str, default: int) -> int:
     try:
@@ -21,8 +19,6 @@ def _int_env(name: str, default: int) -> int:
 
 SQLQ_MAX_ATTEMPTS = _int_env("SQLQ_MAX_ATTEMPTS", 3)
 SQLQ_RETRY_BASE_SEC = _int_env("SQLQ_RETRY_BASE_SEC", 2)
-
-# ---------- Paths & basics ----------
 
 
 def _db_path() -> str:
@@ -36,8 +32,6 @@ def _db_path() -> str:
     return os.path.join("data", "jobs.db")
 
 
-# ---------- Schema management ----------
-
 DDL_JOBS = """
 CREATE TABLE IF NOT EXISTS jobs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +42,6 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
-# optional columns added via migrations (idempotent)
 _OPTIONAL_COLS = {
     "attempts": "ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;",
     "next_run_at": "ALTER TABLE jobs ADD COLUMN next_run_at INTEGER;",
@@ -57,54 +50,53 @@ _OPTIONAL_COLS = {
 }
 
 
-def _migrate(con: sqlite3.Connection) -> None:
-    """Create base table and add any missing optional columns. Safe to call repeatedly."""
+def _safe_add_column(con: sqlite3.Connection, name: str, ddl: str) -> None:
     try:
-        con.execute(DDL_JOBS)
-        cols = {row[1] for row in con.execute("PRAGMA table_info(jobs)")}
-        for col, ddl in _OPTIONAL_COLS.items():
-            if col not in cols:
-                con.execute(ddl)
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_ready "
-            "ON jobs(status, next_run_at, priority, id)"
-        )
+        con.execute(ddl)
     except sqlite3.OperationalError as e:
-        if "readonly" not in str(e).lower():
-            raise
+        msg = str(e).lower()
+        if "duplicate" in msg or "already exists" in msg:
+            return
+        raise
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    con.execute(DDL_JOBS)
+    cols = {row[1] for row in con.execute("PRAGMA table_info(jobs)")}
+    for col, ddl in _OPTIONAL_COLS.items():
+        if col not in cols:
+            _safe_add_column(con, col, ddl)
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jobs_ready " "ON jobs(status, next_run_at, priority, id)"
+    )
 
 
 @contextmanager
 def _conn():
-    """Open connection, apply pragmas and migrations, then yield."""
     path = _db_path()
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     con = sqlite3.connect(path, timeout=30, check_same_thread=False)
     try:
-        con.execute("PRAGMA journal_mode=WAL;")
-        con.execute("PRAGMA synchronous=NORMAL;")
-        con.execute("PRAGMA foreign_keys=ON;")
-    except sqlite3.OperationalError:
-        pass
-    _migrate(con)
-    con.commit()
-    try:
+        try:
+            con.execute("PRAGMA journal_mode=WAL;")
+            con.execute("PRAGMA synchronous=NORMAL;")
+            con.execute("PRAGMA foreign_keys=ON;")
+        except sqlite3.OperationalError:
+            pass
+        _migrate(con)
+        con.commit()
         yield con
     finally:
         con.close()
 
 
 def init() -> None:
-    """Compatibility entrypoint for callers expecting q.init(). Ensures DB and schema exist."""
     with _conn():
         pass
 
 
 def _now() -> int:
     return int(time.time())
-
-
-# ---------- JSON helpers ----------
 
 
 def _json_dumps(value: Any) -> str:
@@ -121,7 +113,7 @@ def _json_loads_maybe(s: str | None) -> Any:
 
 
 def _normalize_result_for_storage(result: Any) -> str:
-    if isinstance(result, bytes | bytearray):
+    if isinstance(result, (bytes, bytearray)):
         result = result.decode("utf-8", errors="replace")
     if isinstance(result, str):
         try:
@@ -132,18 +124,12 @@ def _normalize_result_for_storage(result: Any) -> str:
     return _json_dumps(result)
 
 
-# ---------- Backoff ----------
-
-
 def _next_delay(attempts: int) -> int:
-    exp = max(0, attempts)  # 0,1,2,...
+    exp = max(0, attempts)
     base = max(1, SQLQ_RETRY_BASE_SEC)
     delay = base * (2**exp)
-    jitter = random.uniform(0, 0.25 * delay)  # nosec B311: non-crypto backoff jitter
+    jitter = random.uniform(0, 0.25 * delay)  # nosec B311
     return int(delay + jitter)
-
-
-# ---------- Core queue API ----------
 
 
 def enqueue(
@@ -151,9 +137,9 @@ def enqueue(
     *,
     task: str | None = None,
     payload: dict[str, Any] | None = None,
-    key: str | None = None,  # accepted for API compatibility; unused
+    key: str | None = None,
     priority: int = 0,
-    not_before: int | None = None,  # epoch seconds
+    not_before: int | None = None,
 ) -> int:
     if isinstance(item, dict) and task is None and payload is None:
         task = str(item.get("task", ""))
@@ -161,10 +147,8 @@ def enqueue(
     else:
         task = str(task or "")
         payload = payload or {}
-
     if not task:
         raise ValueError("enqueue: 'task' must be provided")
-
     payload_json = _json_dumps(payload)
     with _conn() as con:
         cur = con.execute(
@@ -202,7 +186,6 @@ def dequeue() -> int | None:
         if not row:
             con.execute("COMMIT")
             return None
-
         job_id = int(row[0])
         updated = con.execute(
             "UPDATE jobs SET status='in_progress' WHERE id=? AND status='queued'",
@@ -211,7 +194,6 @@ def dequeue() -> int | None:
         if updated.rowcount == 0:
             con.execute("COMMIT")
             return None
-
         con.commit()
         return job_id
 
@@ -220,10 +202,8 @@ def load(job_id: int) -> dict[str, Any]:
     with _conn() as con:
         con.row_factory = sqlite3.Row
         row = con.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
-
     if not row:
         return {}
-
     keys = row.keys()
     return {
         "id": row["id"],
@@ -255,16 +235,13 @@ def finish(job_id: int, result: Any) -> None:
 
 
 def fail(job_id: int, message: str) -> None:
-    """Retry with exponential backoff or mark terminal error."""
     with _conn() as con:
         con.row_factory = sqlite3.Row
         row = con.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
         attempts = int(row["attempts"]) if row else 0
-
         new_attempts = attempts + 1
         terminal = new_attempts >= max(1, SQLQ_MAX_ATTEMPTS)
         err_payload = {"ok": False, "error": str(message), "attempts": new_attempts}
-
         if terminal:
             con.execute(
                 """
@@ -279,7 +256,7 @@ def fail(job_id: int, message: str) -> None:
                 (_json_dumps(err_payload), new_attempts, str(message), job_id),
             )
         else:
-            delay = _next_delay(attempts)  # use pre-increment attempts
+            delay = _next_delay(attempts)
             con.execute(
                 """
                 UPDATE jobs
@@ -294,9 +271,6 @@ def fail(job_id: int, message: str) -> None:
         con.commit()
 
 
-# ---------- Introspection helpers ----------
-
-
 def list_recent(limit: int = 50) -> list[dict[str, Any]]:
     with _conn() as con:
         con.row_factory = sqlite3.Row
@@ -304,7 +278,6 @@ def list_recent(limit: int = 50) -> list[dict[str, Any]]:
             "SELECT * FROM jobs ORDER BY id DESC LIMIT ?",
             (max(1, limit),),
         ).fetchall()
-
     out: list[dict[str, Any]] = []
     for r in rows:
         keys = r.keys()

@@ -1,36 +1,58 @@
-# services/worker/main.py
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import os
-import subprocess  # nosec B404: controlled commands, shell=False
 import sys
+import threading
 import time
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
-# Optional local hooks; safe if missing.
-try:
-    import sitecustomize  # type: ignore  # noqa: F401
-except ImportError:
-    sitecustomize = None
+import pytest
 
 from orchestrator.router_client import route
 
 
-# --- queue accessor (resolve after env is set, works in tests) ----------------
+def _truthy(v: str | None) -> bool:
+    return bool(v) and v.lower() not in {"0", "", "false", "no"}
+
+
 def _q():
     return importlib.import_module("services.queue.sqlite_queue")
 
 
-# --- router calling & normalization ------------------------------------------
+# optional embedded worker (useful for smoke tests started via API)
+def _start_embedded_worker() -> None:
+    if getattr(_start_embedded_worker, "_started", False):
+        return
+    _start_embedded_worker._started = True
+
+    def _run():
+        try:
+            from services.worker.main import main as _main
+
+            _main()
+        except Exception as e:
+            print(f"[embedded-worker] fatal: {e}", file=sys.stderr, flush=True)
+
+    t = threading.Thread(target=_run, name="embedded-worker", daemon=True)
+    t.start()
+
+
+if _truthy(os.getenv("EMBEDDED_WORKER", "1")):
+    _start_embedded_worker()
+
+
 def _call_router(name: str, payload: dict) -> Any:
     try:
         return route({"task": name, "payload": payload})
     except TypeError as te:
         try:
-            return route(name, payload)  # legacy
+            return route(name, payload)
         except Exception:
+            # preserve original TypeError per tests
             raise te from None
 
 
@@ -50,7 +72,6 @@ def _normalize_result(raw: Any) -> dict:
     return {"ok": True, "data": raw}
 
 
-# --- helpers ------------------------------------------------------------------
 def _as_dict_payload(val: Any) -> dict[str, Any]:
     if isinstance(val, dict):
         return val
@@ -72,7 +93,6 @@ def _require_job_done(job_id: int) -> dict[str, Any]:
     return rec.get("result") or {}
 
 
-# --- tasks --------------------------------------------------------------------
 def _task_fail_n(rec: dict) -> dict:
     payload = _as_dict_payload(rec.get("payload"))
     want = int(payload.get("fail_times", 1))
@@ -92,13 +112,9 @@ def _task_plan_pipeline(rec: dict) -> dict:
         plan_preview = {"ok": True, "plan": f"{idea} via {module}"}
 
     code_job_id = _enqueue(
-        "generate_code",
-        {"idea": idea, "module": module, "parent_job": rec.get("id")},
+        "generate_code", {"idea": idea, "module": module, "parent_job": rec.get("id")}
     )
-    test_job_id = _enqueue(
-        "run_tests",
-        {"code_job_id": code_job_id, "parent_job": rec.get("id")},
-    )
+    test_job_id = _enqueue("run_tests", {"code_job_id": code_job_id, "parent_job": rec.get("id")})
 
     return {
         "ok": True,
@@ -148,51 +164,33 @@ def _task_run_tests(rec: dict) -> dict:
     module = (code_result or {}).get("module", "hello_mod")
     test_path = f"tests/test_{module}.py"
 
-    env = os.environ.copy()
-    env.pop("API_KEYS", None)
     src = os.path.abspath("src")
-    env["PYTHONPATH"] = f"{src}:{env.get('PYTHONPATH','')}"
+    if src not in sys.path:
+        sys.path.insert(0, src)
 
-    try:
-        out = subprocess.run(  # nosec B603,B607: static args, no user input
-            [sys.executable, "-m", "pytest", "-q", test_path],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    with redirect_stdout(buf_out), redirect_stderr(buf_err):
+        rc = pytest.main(["-q", test_path])
+    if rc != 0:
+        raise RuntimeError(
+            f"pytest returned exit code {rc}\n{buf_out.getvalue()}\n{buf_err.getvalue()}"
         )
-        return {
-            "ok": True,
-            "message": "tests passed",
-            "stdout": out.stdout,
-            "stderr": out.stderr,
-            "using": {"code_job_id": code_job_id, "code_result": code_result},
-        }
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"pytest failed (exit {e.returncode})\n{e.stdout}\n{e.stderr}") from e
+
+    return {"ok": True, "stdout": buf_out.getvalue(), "stderr": buf_err.getvalue()}
 
 
-# --- dispatcher ---------------------------------------------------------------
 def process_job(rec: dict) -> dict:
-    """
-    Load -> dispatch -> normalize.
-    'plan' passes through by default; pipeline when enabled.
-    Only add 'plan' when 'module' is present (keeps unit tests strict).
-    """
     name = rec["task"]
 
     if name == "fail_n":
         return _task_fail_n(rec)
 
     if name == "plan":
-        if os.getenv("WORKER_ENABLE_PIPELINE", "0").lower() not in {
-            "",
-            "0",
-            "false",
-            "no",
-        }:
-            return _task_plan_pipeline(rec)
         payload = _as_dict_payload(rec.get("payload"))
+        # Pipeline only when explicitly requested AND a module is provided.
+        if _truthy(os.getenv("WORKER_ENABLE_PIPELINE")) and str(payload.get("module", "")).strip():
+            return _task_plan_pipeline(rec)
         res = _normalize_result(_call_router(name, payload))
         module = str(payload.get("module", "")).strip()
         if module:
@@ -210,18 +208,12 @@ def process_job(rec: dict) -> dict:
     return _normalize_result(_call_router(name, payload))
 
 
-# --- main loop ----------------------------------------------------------------
 def main() -> None:
     _q().init()
     print("worker: online", flush=True)
     processed = 0
 
-    run_once = "WORKER_RUN_ONCE" in os.environ and os.environ["WORKER_RUN_ONCE"].lower() not in {
-        "0",
-        "",
-        "false",
-        "no",
-    }
+    run_once = _truthy(os.getenv("WORKER_RUN_ONCE"))
     max_jobs_env = os.getenv("WORKER_MAX_JOBS", "").strip()
     try:
         max_jobs = int(max_jobs_env) if max_jobs_env else None
