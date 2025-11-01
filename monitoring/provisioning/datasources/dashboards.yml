@@ -1,7 +1,11 @@
 apiVersion: 1
 providers:
-  - name: Velu
+  - name: velu
+    orgId: 1
+    folder: Velu
     type: file
+    disableDeletion: false
+    allowUiUpdates: true
     updateIntervalSeconds: 30
     options:
       path: /var/lib/grafana/dashboards

@@ -1,35 +1,35 @@
+# data/src/local_tasks.py
 from __future__ import annotations
-from typing import Any, Dict, Callable
-import inspect
+from typing import Any
 
 
-# Your simple payload-only handler
-def plan_handler(payload: Dict[str, Any]) -> Dict[str, Any]:
-    idea = str(payload.get("idea", "")).strip()
-    module = str(payload.get("module", "")).strip()
-    return {"ok": True, "marker": "local-tasks-plan", "plan": f"{idea} via {module}"}
+def plan(payload: dict[str, Any]) -> dict[str, Any]:
+    idea = str(payload.get("idea", "demo"))
+    module = str(payload.get("module", "hello_mod"))
+    return {"ok": True, "plan": f"{idea} via {module}"}
 
 
-def _wrap_if_needed(
-    fn: Callable[..., Dict[str, Any]],
-) -> Callable[[str, Dict[str, Any]], Dict[str, Any]]:
-    """
-    Ensure the function conforms to (name, payload) -> dict expected by the worker's agents map.
-    If `fn` only accepts (payload), wrap it.
-    """
-    try:
-        params = list(inspect.signature(fn).parameters.values())
-    except Exception:
-        # If we can't inspect, assume payload-only
-        return lambda name, payload: fn(payload)
+def codegen(payload: dict[str, Any]) -> dict[str, Any]:
+    idea = str(payload.get("idea", "demo"))
+    module = str(payload.get("module", "hello_mod"))
 
-    if len(params) == 1:
-        return lambda name, payload: fn(payload)
-    return fn  
+    files: list[dict[str, str]] = [
+        {
+            "path": f"{module}/__init__.py",
+            "content": "# generated package\n",
+        },
+        {
+            "path": f"{module}/main.py",
+            "content": ("def run():\n" f'    return "{idea} via {module}"\n'),
+        },
+        {
+            "path": f"tests/test_{module}.py",
+            "content": ("def test_sanity():\n" "    assert True\n"),
+        },
+    ]
+    return {"ok": True, "files": files}
 
 
-def register(
-    register_fn: Callable[[str, Callable[[str, Dict[str, Any]], Dict[str, Any]]], None],
-) -> None:
-    """Called by sitecustomize with a `register_fn(name, handler)` callback."""
-    register_fn("plan", _wrap_if_needed(plan_handler))
+# Back-compat: allow callers that still send `generate_code`
+def generate_code(payload: dict[str, Any]) -> dict[str, Any]:
+    return codegen(payload)

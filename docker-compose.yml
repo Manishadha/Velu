@@ -1,13 +1,15 @@
+version: "3.9"
+
 services:
   api:
-    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
+    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-main}
     pull_policy: always
     command: >
       uvicorn services.app_server.main:create_app
       --factory --host 0.0.0.0 --port 8010
       --log-level debug
     ports:
-      - "127.0.0.1:8010:8010"
+      - "127.0.0.1:8080:8010"
     environment:
       AUTH_MODE: "strict"
       JWT_SECRET: "${JWT_SECRET}"
@@ -15,7 +17,10 @@ services:
       JWT_ISSUER: "velu"
       JWT_ALG: "HS256"
       API_KEYS: ${API_KEYS:-dev}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+      METRICS_USER: ${METRICS_USER:-admin}
+      # keep single-quoted so $ isn’t expanded by Compose
+      METRICS_HASH: '${METRICS_HASH:-$2a$14$bbQEcg6XTWhyIObSoNMJC.kT5ZRhtvPz3CWG5GJ1P9ZwA0YCUOUOS}'
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5178,http://127.0.0.1:5178}
       TASK_DB: /data/jobs.db
     restart: unless-stopped
     read_only: true
@@ -28,58 +33,62 @@ services:
       start_period: 10s
     logging:
       driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      options: { max-size: "10m", max-file: "3" }
     volumes:
       - data:/data
+      - ./services:/app/services:ro
+
+  console:
+    build:
+      context: ./velu-console
+      args:
+        VITE_API_URL: "http://127.0.0.1:8080"
+    ports:
+      - "127.0.0.1:5178:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
 
   worker:
-   image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
-   pull_policy: always
-   command:
-    - python
-    - -c
-    - |
-      import sys, importlib
-      sys.path[:0] = ['/app', '/app/src']
-      import sitecustomize  # defines _db_pop_one_fixed
-      we = importlib.import_module('services.queue.worker_entry')
-      # Hard-bind the patch onto the SAME module object we'll run:
-      if hasattr(sitecustomize, '_db_pop_one_fixed'):
-          we._db_pop_one = sitecustomize._db_pop_one_fixed
-          print("startup: forced _db_pop_one -> sitecustomize._db_pop_one_fixed", flush=True)
-      we.main()
-   depends_on:
-    api:
-      condition: service_healthy
-   environment:
-    TASK_DB: /data/jobs.db
-    WORKER_ENABLE_PIPELINE: ${WORKER_ENABLE_PIPELINE:-1}
-    WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-0}
-    WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
-   restart: unless-stopped
-   read_only: true
-   tmpfs: ["/tmp"]
-   volumes:
-    - data:/data
-    - ./data/src:/app/src
-   healthcheck:
-    test:
-      [
-        "CMD-SHELL",
-        "python -c \"import sqlite3,sys; con=sqlite3.connect('/data/jobs.db', timeout=2); cur=con.cursor(); cur.execute('BEGIN IMMEDIATE'); cur.execute('ROLLBACK'); sys.exit(0)\"",
-      ]
-    interval: 30s
-    timeout: 5s
-    retries: 3
-    start_period: 15s
-
-
-
+    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-main}
+    pull_policy: always
+    command:
+      - python
+      - -c
+      - |
+        import sys, importlib
+        sys.path[:0] = ['/app', '/app/src']
+        import sitecustomize  # triggers all patches on import
+        importlib.import_module('services.queue.worker_entry').main()
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      TASK_DB: /data/jobs.db
+      WORKER_ENABLE_PIPELINE: ${WORKER_ENABLE_PIPELINE:-1}
+      WORKER_MAX_JOBS: ${WORKER_MAX_JOBS:-0}
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-1}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    volumes:
+      - data:/data
+      - ./services:/app/services:ro
+      - ./data/src:/app/src
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sqlite3,sys; con=sqlite3.connect('/data/jobs.db', timeout=2); cur=con.cursor(); cur.execute('BEGIN IMMEDIATE'); cur.execute('ROLLBACK'); sys.exit(0)\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   sqlite_backup:
-    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-latest}
+    image: ghcr.io/manishadha/velu-app:${VELU_TAG:-main}
     pull_policy: always
     depends_on:
       api:
@@ -148,7 +157,8 @@ secrets:
 
 volumes:
   data:
-  caddy_data:
-  caddy_config:
+    name: velu_data
   grafana_data:
+    name: velu_grafana_data
   prom_data:
+    name: velu_prom_data

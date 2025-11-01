@@ -1,0 +1,150 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Velu Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; max-width: 900px; }
+    h1 { margin-bottom: 8px; }
+    section { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 16px 0; }
+    input, textarea, select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+    label { font-weight: 600; display:block; margin: 8px 0; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #222; background: #111; color: #fff; cursor: pointer; }
+    pre { background: #f8f8f8; padding: 10px; border-radius: 8px; overflow: auto; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Velu Console</h1>
+  <p>Quickly submit tasks and inspect results.</p>
+
+  <section>
+    <h2>Config</h2>
+    <div class="row">
+      <label>API Base
+        <input id="apiBase" placeholder="http://localhost:8080" value="http://localhost:8080" />
+      </label>
+      <label>X-API-Key (optional)
+        <input id="apiKey" placeholder="demo" />
+      </label>
+    </div>
+  </section>
+
+  <section>
+    <h2>New Task</h2>
+    <div class="row">
+      <label>Task
+        <input id="taskName" placeholder="plan" value="plan" />
+      </label>
+      <label>Payload (JSON)
+        <textarea id="taskPayload" rows="4">{ "idea": "demo", "module": "hello_mod" }</textarea>
+      </label>
+    </div>
+    <button id="btnSubmit">Submit</button>
+    <pre id="submitOut"></pre>
+  </section>
+
+  <section>
+    <h2>Job Detail</h2>
+    <div class="row">
+      <label>Job ID
+        <input id="jobId" placeholder="123" />
+      </label>
+      <div>
+        <button id="btnFetch">Fetch Once</button>
+        <button id="btnPoll">Start Poll</button>
+        <button id="btnStop">Stop Poll</button>
+      </div>
+    </div>
+    <pre id="jobOut"></pre>
+  </section>
+
+  <section>
+    <h2>Policy Preview</h2>
+    <div class="row">
+      <label>Task
+        <input id="ppTask" value="plan" />
+      </label>
+      <label>Payload (JSON)
+        <textarea id="ppPayload" rows="4">{ "x": 1 }</textarea>
+      </label>
+    </div>
+    <button id="btnPP">Preview</button>
+    <pre id="ppOut"></pre>
+  </section>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let poll = null;
+
+    function headers() {
+      const h = { "content-type": "application/json" };
+      const key = $("apiKey").value.trim();
+      if (key) h["X-API-Key"] = key;
+      return h;
+    }
+
+    function api(path) {
+      return ($("apiBase").value.trim().replace(/\/+$/,"")) + path;
+    }
+
+    $("btnSubmit").onclick = async () => {
+      try {
+        const payload = JSON.parse($("taskPayload").value || "{}");
+        const r = await fetch(api("/tasks"), {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ task: $("taskName").value.trim(), payload })
+        });
+        const j = await r.json();
+        $("submitOut").textContent = JSON.stringify(j, null, 2);
+        if (j.job_id) $("jobId").value = j.job_id;
+      } catch (e) {
+        $("submitOut").textContent = String(e);
+      }
+    };
+
+    $("btnFetch").onclick = async () => {
+      await fetchJob();
+    };
+
+    $("btnPoll").onclick = async () => {
+      if (poll) return;
+      poll = setInterval(fetchJob, 1000);
+    };
+
+    $("btnStop").onclick = () => {
+      if (poll) clearInterval(poll);
+      poll = null;
+    };
+
+    async function fetchJob() {
+      const id = $("jobId").value.trim();
+      if (!id) return;
+      try {
+        const r = await fetch(api(`/results/${id}`), { headers: headers() });
+        const j = await r.json();
+        $("jobOut").textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        $("jobOut").textContent = String(e);
+      }
+    }
+
+    $("btnPP").onclick = async () => {
+      try {
+        const payload = JSON.parse($("ppPayload").value || "{}");
+        const r = await fetch(api("/route/preview"), {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ task: $("ppTask").value.trim(), payload })
+        });
+        const j = await r.json();
+        $("ppOut").textContent = JSON.stringify(j, null, 2);
+      } catch (e) {
+        $("ppOut").textContent = String(e);
+      }
+    };
+  </script>
+</body>
+</html>

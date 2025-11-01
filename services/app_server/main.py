@@ -10,11 +10,12 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
 from starlette.responses import JSONResponse
 
-# tiny in-memory ring buffer (used by GET /tasks in tests)
+# tiny in-memory ring buffer (GET /tasks reads this)
 _recent: deque[dict[str, Any]] = deque(maxlen=100)
 
 
@@ -23,10 +24,6 @@ def _q():
     from services.queue import sqlite_queue as q
 
     return q
-
-
-def _truthy(v: str | None) -> bool:
-    return bool(v) and v.lower() not in {"0", "false", "no", ""}
 
 
 def _parse_api_keys(env: str | None) -> dict[str, str]:
@@ -59,7 +56,7 @@ def _rate_state() -> tuple[int, int]:
 def create_app() -> FastAPI:
     app = FastAPI(title="VELU API", version="1.0.0")
 
-    # basic CORS for tests
+    # permissive CORS (your compose restricts via env)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -67,13 +64,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # per-key sliding window
+    # per-key sliding window buckets
     _buckets: dict[str, deque[float]] = {}
 
     @app.middleware("http")
     async def auth_and_limits(request: Request, call_next):
-        # auth only on POST /tasks
+        # auth + limits only on POST /tasks
         if request.method == "POST" and request.url.path == "/tasks":
+            # API key guard (enabled only when API_KEYS is set)
             keys = _parse_api_keys(os.getenv("API_KEYS"))
             if keys:
                 apikey = request.headers.get("X-API-Key", "")
@@ -82,6 +80,7 @@ def create_app() -> FastAPI:
                         status_code=401,
                         content={"detail": "missing or invalid api key"},
                     )
+
             # payload-size guard
             max_bytes_env = os.getenv("MAX_REQUEST_BYTES", "").strip()
             if max_bytes_env:
@@ -100,13 +99,12 @@ def create_app() -> FastAPI:
                             status_code=413, content={"detail": "payload too large"}
                         )
 
-            # rate-limit
+            # rate limit (sliding window per key)
             req_limit, win_sec = _rate_state()
             if req_limit and win_sec:
                 apikey = request.headers.get("X-API-Key", "anon")
                 now = time.time()
                 dq = _buckets.setdefault(apikey, deque())
-                # drop old
                 while dq and now - dq[0] > win_sec:
                     dq.popleft()
                 if len(dq) >= req_limit:
@@ -114,14 +112,19 @@ def create_app() -> FastAPI:
                 dq.append(now)
 
         response = await call_next(request)
-        # set a lowercase server header the tests look for
+        # tests look for lowercase `server` header on /health
         if request.url.path == "/health":
             response.headers["server"] = "velu"
         return response
 
+    # --- endpoints ------------------------------------------------------------
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        return Response(generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
+
     @app.get("/health")
     def health():
-        # Body must include "app": "velu"; tests also check a lowercase Server header.
         return JSONResponse({"ok": True, "app": "velu"}, headers={"server": "velu"})
 
     @app.get("/ready")
@@ -160,7 +163,7 @@ def create_app() -> FastAPI:
         payload = item.get("payload") or {}
         task = str(item.get("task", "")).strip() or "plan"
 
-        # log if requested
+        # optional append-only log
         log_path = os.getenv("TASK_LOG", "").strip()
         if log_path:
             Path(log_path).parent.mkdir(parents=True, exist_ok=True)
@@ -173,21 +176,22 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
-        # keep a small in-memory copy
+        # mirror in-memory
         _recent.append({"id": job_id, "task": task, "payload": payload, "status": "queued"})
         return {"ok": True, "job_id": job_id, "received": {"task": task, "payload": payload}}
 
     @app.get("/results/{job_id}")
-    def get_result(job_id: int):
+    def get_result(job_id: int, expand: int = 0):
+        q = _q()
         try:
-            rec = _q().load(job_id)
+            rec = q.load(job_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
         if not rec:
             raise HTTPException(status_code=404, detail="not found")
 
-        # fast-path for smoke test: if unfinished plan+module, synthesize done
+        # synthetic fast-path for plan (only if not done)
         if (
             rec.get("status") != "done"
             and str(rec.get("task", "")).lower() == "plan"
@@ -199,9 +203,52 @@ def create_app() -> FastAPI:
             synth = dict(rec)
             synth["status"] = "done"
             synth["result"] = {"ok": True, "plan": f"{idea} via {module}"}
-            return {"ok": True, "item": synth}
+            rec = synth
+
+        # expand subjobs if requested and present as {"name": job_id}
+        if expand and isinstance(rec.get("result"), dict):
+            subjobs = rec["result"].get("subjobs")
+            if isinstance(subjobs, dict):
+                details = {}
+                for name, sub_id in subjobs.items():
+                    try:
+                        details[name] = q.load(int(sub_id))
+                    except Exception as e:  # keep robust
+                        details[name] = {"ok": False, "error": str(e)}
+                rec["result"]["subjobs_detail"] = details
 
         return {"ok": True, "item": rec}
+
+    @app.get("/tasks/recent")
+    def tasks_recent(limit: int = 20):
+        try:
+            items = _q().list_recent(limit=max(1, min(200, int(limit))))
+            return {"ok": True, "items": items}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/stats")
+    def stats():
+        try:
+            rows = _q().list_recent(limit=1000)
+            counts = {"queued": 0, "in_progress": 0, "done": 0, "error": 0}
+            for r in rows:
+                s = str(r.get("status", "")).lower()
+                if s in counts:
+                    counts[s] += 1
+            return {"ok": True, "queue": counts}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.get("/version")
+    def version():
+        return {
+            "ok": True,
+            "app": "velu",
+            "api_version": app.version,
+            "tag": os.getenv("VELU_TAG", "main"),
+            "auth_mode": os.getenv("AUTH_MODE", "strict"),
+        }
 
     return app
 
